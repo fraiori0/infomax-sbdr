@@ -150,6 +150,8 @@ similarity_dict = {
     "jaccard": partial(sbdr.expected_Jaccard_index, eps=1e-8),
     "gamma": partial(sbdr.gamma_similarity, eps=1e-8),
     "and": sbdr.expected_and,
+    "proxy_jaccard": partial(sbdr.proxy_jaccard_index, eps=1e-8),
+    "asymmetric_jaccard": partial(sbdr.asymmetric_jaccard_similarity, eps=1e-8),
 }
 
 
@@ -171,10 +173,10 @@ if __name__ == "__main__":
 
     key = jax.random.PRNGKey(SEED)
 
-    SIMILARITY = "jaccard"
-    N_TOT_FEATURES = 128
-    N_SINGLE_MASK_SAMPLES = 200
-    N_MASK_P_RESAMPLES = 100
+    SIMILARITY = "proxy_jaccard"
+    N_TOT_FEATURES = 256
+    N_SINGLE_MASK_SAMPLES = 100
+    N_MASK_P_RESAMPLES = 200
     N_MASK_MEAN_ACTIVE = [1.0, 2.0, 3.0, 4.0]
     MASK_CONCENTRATIONS = [0.2, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0]
     MASK_MULTIPLIERS = [0.1, 0.2, 0.5, 0.9, 1.0]
@@ -315,7 +317,7 @@ if __name__ == "__main__":
 
     fig.update_layout(
         title=f"MI non-uniform mask - {N_TOT_FEATURES} Features<br>Similarity: {SIMILARITY}<br>Mask resamples: {N_MASK_P_RESAMPLES}<br>Samples per single mask: {N_SINGLE_MASK_SAMPLES}",
-        xaxis_title="Noise level (mean)",
+        xaxis_title="Concentration",
         yaxis_title="MI",
         # legend_title="Baseline active features<br>(no noise)",
         # set fig style to white
@@ -323,7 +325,7 @@ if __name__ == "__main__":
         paper_bgcolor="white",
         # and grey gridlines
         xaxis=dict(gridcolor="lightgrey"),
-        yaxis=dict(gridcolor="lightgrey", range=[0, MIs.max() + 1]),
+        yaxis=dict(gridcolor="lightgrey", range=[MIs.min() - 1, MIs.max() + 1]),
         # tick every unit on the x axis
         xaxis_dtick=1,
         # and every 0.5 units on the y axis

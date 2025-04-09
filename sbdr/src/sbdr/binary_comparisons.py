@@ -274,10 +274,18 @@ def expected_xor(px1, px2):
 
 @jit
 def proxy_jaccard_index(px1, px2, eps=1.0):
-    """YOOO
-    -
+    """
+    p(px1 | px2) = E(AND(px1, px2)) / E(OR(px1, px2))
     """
     return (expected_and(px1, px2) + eps) / (expected_or(px1, px2) + eps)
+
+
+@jit
+def asymmetric_jaccard_similarity(px1, px2, eps=1.0e-6):
+    """
+    p(px1 | px2) = E(AND(px1, px2)) / E(OR(px2, px2))
+    """
+    return (expected_and(px1, px2) + eps) / (expected_or(px2, px2) + eps)
 
 
 @jit
@@ -287,6 +295,9 @@ def expected_custom_index(px1, px2, eps=1.0e-6):
 
 @jit
 def gamma_similarity(px1, px2, eps=1.0e-6):
+    """
+    p(px1 | px2) = E(AND(px1, px2)) / E(|px2|)
+    """
     return expected_and(px1, px2) / (px2.sum(axis=-1) + eps)
 
 
