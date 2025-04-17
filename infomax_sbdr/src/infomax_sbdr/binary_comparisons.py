@@ -3,6 +3,22 @@ import jax.numpy as np
 from jax import jit
 
 
+def and_soft(px1, px2):
+    return px1 * px2
+
+
+def or_soft(px1, px2):
+    return 1 - (1 - px1) * (1 - px2)
+
+
+def xor_soft(px1, px2):
+    return (1 - px1) * px2 + px1 * (1 - px2)
+
+
+def andnot_soft(px1, px2):
+    return px1 * (1 - px2)
+
+
 @jit
 def expected_Jaccard_index_stable(px1, px2, eps=1e-8):
     """Expected Jaccard index between two samples taken from the input from the input multivariate Bernoulli distirbutions

@@ -3,7 +3,7 @@ import sys
 import jax
 import jax.numpy as np
 from jax import grad, jit, vmap
-import sbdr
+import infomax_sbdr as sbdr
 import plotly.graph_objects as go
 from jax.experimental import sparse
 from time import time
@@ -185,11 +185,11 @@ if __name__ == "__main__":
 
     key = jax.random.PRNGKey(SEED)
 
-    SIMILARITY = "gamma"
+    SIMILARITY = "proxy_jaccard"
     N_TOT_FEATURES = 128
-    N_SINGLE_MASK_SAMPLES = 150
-    N_MASK_P_RESAMPLES = 150
-    N_MASK_MEAN_ACTIVE = [1.0, 2.0, 3.0, 4.0]
+    N_SINGLE_MASK_SAMPLES = 200
+    N_MASK_P_RESAMPLES = 100
+    N_MASK_MEAN_ACTIVE = [1.0, 2.0, 3.0, 4.0, 5.0]
     MASK_CONCENTRATIONS = [0.1, 0.2, 0.5, 1.0, 10.0, 100.0]
     ACTIVATION_RANGES = [
         (0.1, 1.0),

@@ -3,7 +3,7 @@ import sys
 import jax
 import jax.numpy as np
 from jax import grad, jit, vmap
-import sbdr
+import infomax_sbdr as sbdr
 import plotly.graph_objects as go
 from jax.experimental import sparse
 from time import time
@@ -185,11 +185,11 @@ if __name__ == "__main__":
 
     key = jax.random.PRNGKey(SEED)
 
-    SIMILARITY = "gamma"
+    SIMILARITY = "proxy_jaccard"
     N_TOT_FEATURES = 128
     N_SINGLE_MASK_SAMPLES = 200
     N_MASK_P_RESAMPLES = 100
-    N_MASK_MEAN_ACTIVE = [1.0, 2.0, 3.0, 4.0]
+    N_MASK_MEAN_ACTIVE = [1.0, 2.0, 3.0, 4.0, 5.0]
     MASK_CONCENTRATION = 100.0
     ACTIVATION_RANGE = (0.9, 1.0)
     # NOTE visualize Beta distribution PDF
@@ -370,6 +370,6 @@ if __name__ == "__main__":
     fig.show()
 
     if SAVE_FIGS:
-        fig_name = f"mi_non-uniform_mask-act_{SIMILARITY}_{N_TOT_FEATURES}_mask-resamples-{N_MASK_P_RESAMPLES}_single-mask-samples-{N_SINGLE_MASK_SAMPLES}"
+        fig_name = f"mi_non-uniform_mask-act_noised_{SIMILARITY}_{N_TOT_FEATURES}_mask-resamples-{N_MASK_P_RESAMPLES}_single-mask-samples-{N_SINGLE_MASK_SAMPLES}"
         fig_path = os.path.join(fig_base_path, fig_name + ".html")
         fig.write_html(fig_path, include_plotlyjs="directory")

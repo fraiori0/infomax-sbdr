@@ -1,7 +1,7 @@
 import flax.linen as nn
 import optax
-from sbdr.modules import *
-from sbdr.transforms import *
+from infomax_sbdr.modules import *
+from infomax_sbdr.transforms import *
 
 """
 Convenience dictionaries to match strings in config files to functions and classes.
