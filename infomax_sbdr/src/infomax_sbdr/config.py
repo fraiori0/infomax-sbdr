@@ -1,7 +1,9 @@
 import flax.linen as nn
 import optax
-from infomax_sbdr.modules import *
+from infomax_sbdr.dense_modules import *
+from infomax_sbdr.conv_modules import *
 from infomax_sbdr.transforms import *
+import infomax_sbdr.binary_comparisons as bc
 
 """
 Convenience dictionaries to match strings in config files to functions and classes.
@@ -30,9 +32,15 @@ config_optimizer_dict = {
 
 config_module_dict = {
     "DenseFLOSigmoid": DenseFLOSigmoid,
+    "ConvFLONoPoolNoLast": ConvFLONoPoolNoLast,
+    "ConvFLONoPool": ConvFLONoPool,
 }
 
 config_transform_dict = {
     "minmax": minmax_transform,
     "offsetscale": offsetscale_transform,
+}
+
+config_similarity_dict = {
+    "jaccard": bc.proxy_jaccard_index,
 }

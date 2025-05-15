@@ -1,0 +1,50 @@
+[model]
+type = "ConvFLONoPool"
+seed = 68
+activation = "elu"
+[model.kwargs]
+kernel_features = [16, 32, 64]
+kernel_sizes = [[3, 3], [3, 3], [3, 3]]
+kernel_strides = [[1, 1], [2, 2], [2, 2]]
+kernel_padding = "SAME"
+output_features = 128
+
+[dataset]
+flatten = false
+[dataset.window]
+step = 1
+[dataset.transform]
+type="offsetscale"
+[dataset.transform.kwargs]
+offset = [0.4914, 0.4822, 0.4465]
+scale = [0.2470, 0.2435, 0.2616]
+
+[training]
+epochs = 10000
+batch_size = 128
+shuffle = true
+save = true
+save_interval = 20
+log_interval = 5
+
+[training.checkpoint]
+save = false
+save_interval = 250
+
+[training.loss.kwargs]
+weight_decay = 0.0
+[training.loss.sim_fn]
+type = "jaccard"
+[training.loss.sim_fn.kwargs]
+eps = 1.0e0
+
+[training.optimizer]
+type = "adam"
+
+[training.optimizer.kwargs]
+learning_rate = 0.001
+
+# [logging]
+# log_dir = "logs"
+# log_level = "info"
+# use_tensorboard = true

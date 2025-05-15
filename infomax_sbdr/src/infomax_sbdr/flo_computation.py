@@ -73,8 +73,8 @@ def weighted_flo(uii, pii, pij, wij, eps=1e-6):
         Here we consider that pij does NOT contain pii, and wij does NOT contain wii
     """
     # ws_self is assumed to be equal to 1
-    e_p = (1.0 / (wij.sum(axis=0) - 1.0)) * (
-        (wij * (pij) / (pii + eps)).sum(axis=0) - 1.0
+    e_p = (1.0 / (wij.sum(axis=-1) - 1.0)) * (
+        (wij * (pij) / (pii + eps)).sum(axis=-1) - 1.0
     )
 
     # # FLO
