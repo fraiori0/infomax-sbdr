@@ -59,6 +59,9 @@ class Cifar10Dataset(Dataset):
         if not flatten:
             self.images = self.images.reshape(self.images.shape[0], 3, 32, 32)
 
+        # swap to (H, W, C), flax.linen.conv wants that
+        self.images = self.images.transpose(0, 2, 3, 1)
+
         # convert to torch tensors
         self.images = torch.from_numpy(self.images)
         self.labels = torch.from_numpy(self.labels)

@@ -34,6 +34,7 @@ config_module_dict = {
     "DenseFLOSigmoid": DenseFLOSigmoid,
     "ConvFLONoPoolNoLast": ConvFLONoPoolNoLast,
     "ConvFLONoPool": ConvFLONoPool,
+    "VGGFLO": VGGFLO,
 }
 
 config_transform_dict = {

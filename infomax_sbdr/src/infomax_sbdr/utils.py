@@ -2,7 +2,7 @@ import os
 import json
 import pickle
 import jax.numpy as np
-import optax
+import orbax.checkpoint
 
 
 # convolution operator over one specified axis, useful for time convolution with arbitrary batch dimensions
@@ -23,7 +23,7 @@ def print_pytree_shapes(pytree, prefix=""):
         print(f"{prefix}{pytree.shape}")
 
 
-def save_model(params, history, opt_state, model_path, verbose=True):
+def save_model(params, opt_state, model_path, verbose=True):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
 

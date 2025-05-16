@@ -141,3 +141,120 @@ class ConvFLONoPool(ConvNoPoolBase):
         # negPMI
         negpmi = self.neg_pmi_layer(x)
         return x, negpmi
+
+
+class VGGLayer(nn.Module):
+    """A VGG-style module with two convolutional ;ayers followed by a pool-max."""
+
+    kernel_features: int = None
+    kernel_sizes: Tuple[int] = (3, 3)
+    kernel_strides: Tuple[int, int] = (1, 1)
+    kernel_padding: str = "SAME"
+    pool_sizes: Tuple[int, int] = (2, 2)
+    pool_strides: Tuple[int, int] = (2, 2)
+    pool_padding: str = "SAME"
+    activation_fn: Callable = nn.relu
+    use_batchnorm: bool = False
+    use_dropout: float = False
+    dropout_rate: float = 0.2
+    training: bool = True
+
+    def setup(self):
+        self.conv1 = nn.Conv(
+            features=self.kernel_features,
+            kernel_size=self.kernel_sizes,
+            strides=self.kernel_strides,
+            padding=self.kernel_padding,
+        )
+        self.conv2 = nn.Conv(
+            features=self.kernel_features,
+            kernel_size=self.kernel_sizes,
+            strides=self.kernel_strides,
+            padding=self.kernel_padding,
+        )
+        self.pool = partial(
+            nn.max_pool,
+            window_shape=self.pool_sizes,
+            strides=self.pool_strides,
+            padding=self.pool_padding,
+        )
+
+        if self.use_batchnorm:
+            self.bn1 = nn.BatchNorm(use_running_average=self.training)
+            self.bn2 = nn.BatchNorm(use_running_average=self.training)
+
+        if self.use_dropout:
+            self.dropout = nn.Dropout(
+                rate=self.dropout_rate,
+                deterministic=not self.training,
+            )
+
+    def __call__(self, x):
+        x = self.conv1(x)
+        if self.use_batchnorm:
+            x = self.bn1(x)
+        x = self.activation_fn(x)
+        x = self.conv2(x)
+        if self.use_batchnorm:
+            x = self.bn2(x)
+        x = self.activation_fn(x)
+        x = self.pool(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        return x
+
+
+class VGG(nn.Module):
+    out_features: int
+    kernel_features: Sequence[int]
+    activation_fn: Callable = nn.relu
+    use_batchnorm: bool = False
+    use_dropout: float = False
+    dropout_rates: Sequence[float] = None
+    training: bool = True
+    out_activation_fn: Callable = nn.sigmoid
+
+    def setup(self):
+        conv_layers = []
+        for f, dropout_rate in zip(self.kernel_features, self.dropout_rates):
+            conv_layers.append(
+                VGGLayer(
+                    kernel_features=f,
+                    activation_fn=self.activation_fn,
+                    use_batchnorm=self.use_batchnorm,
+                    use_dropout=self.use_dropout,
+                    dropout_rate=dropout_rate,
+                    training=self.training,
+                ),
+            )
+
+        self.conv_layers = nn.Sequential(conv_layers)
+
+        self.dense_layers = nn.Sequential(
+            [
+                nn.Dense(features=self.out_features),
+                self.out_activation_fn,
+            ]
+        )
+
+    def __call__(self, x):
+        x = self.conv_layers(x)
+        # flatten the last three dimensions (i.e., C, H, W)
+        x = x.reshape((*x.shape[:-3], -1))
+        x = self.dense_layers(x)
+        return x
+
+
+class VGGFLO(VGG):
+
+    def setup(self):
+        super().setup()
+        self.negpmi_layer = nn.Dense(features=1)
+
+    def __call__(self, x):
+        x = self.conv_layers(x)
+        # flatten the last three dimensions (i.e., C, H, W)
+        x = x.reshape((*x.shape[:-3], -1))
+        x = self.dense_layers(x)
+        negpmi = self.negpmi_layer(x)
+        return x, negpmi
