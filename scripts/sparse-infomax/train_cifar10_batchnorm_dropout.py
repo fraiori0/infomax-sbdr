@@ -394,8 +394,10 @@ try:
 
             state, metrics, grads = train_step(state, batch)
 
+            LAST_STEP = state.step.item()
+
             for metric, value in metrics.items():
-                writer.add_scalar(metric, value.item(), global_step=state.step)
+                writer.add_scalar(metric, value.item(), global_step=LAST_STEP)
 
             for metric, value in metrics.items():
                 epoch_stats[metric] += value
@@ -409,13 +411,11 @@ try:
         if (
             (epoch > 0)
             and (epoch % model_config["training"]["save_interval"] == 0)
-            and (epoch % model_config["training"]["save"])
+            and model_config["training"]["save"]
         ):
-            # TODO: here is never executed
-            print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
             # save checkpoint
             checkpoint_manager.save(
-                step=state.step,
+                step=LAST_STEP,
                 items={
                     "params": state.params,
                     "batch_stats": state.batch_stats,
