@@ -89,21 +89,38 @@ transform = partial(
     **kwargs_transform,
 )
 
-dataset_train = sbdr.Cifar10Dataset(
+dataset = sbdr.Cifar10Dataset(
     folder_path=data_folder,
     kind="train",
     transform=transform,
     flatten=model_config["dataset"]["flatten"],
 )
 
-dataloader = sbdr.NumpyLoader(
+dataset_train, dataset_val = torch.utils.data.random_split(
+    dataset,
+    [
+        1 - model_config["training"]["early_stopping"]["val_split"],
+        model_config["training"]["early_stopping"]["val_split"],
+    ],
+    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
+)
+
+
+dataloader_train = sbdr.NumpyLoader(
     dataset_train,
     batch_size=model_config["training"]["batch_size"],
     shuffle=model_config["training"]["shuffle"],
     drop_last=model_config["training"]["drop_last"],
 )
 
-xs, labels = next(iter(dataloader))
+dataloader_val = sbdr.NumpyLoader(
+    dataset_val,
+    batch_size=2 * model_config["training"]["batch_size"],
+    shuffle=False,
+    drop_last=model_config["training"]["drop_last"],
+)
+
+xs, labels = next(iter(dataloader_train))
 
 print(f"\tInput xs: {xs.shape} (dtype: {xs.dtype})")
 print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
@@ -123,6 +140,16 @@ model = model_class(
     out_activation_fn=sbdr.config_activation_dict[
         model_config["model"]["out_activation"]
     ],
+    training=True,
+)
+
+model_eval = model_class(
+    **model_config["model"]["kwargs"],
+    activation_fn=sbdr.config_activation_dict[model_config["model"]["activation"]],
+    out_activation_fn=sbdr.config_activation_dict[
+        model_config["model"]["out_activation"]
+    ],
+    training=False,
 )
 
 checkpoint_manager = orbax.checkpoint.CheckpointManager(
@@ -142,9 +169,10 @@ try:
     LAST_STEP = checkpoint_manager.latest_step()
     ckpt = checkpoint_manager.restore(step=LAST_STEP)
     state = ckpt["state"]
+    print(state.keys())
     variables = {
-        "params": ckpt["params"],
-        "batch_stats": ckpt["batch_stats"],
+        "params": state["variables"]["params"],
+        "batch_stats": state["variables"]["batch_stats"],
     }
     LOADED = True
     print("\nLoaded previous checkpoint")
@@ -152,7 +180,7 @@ except FileNotFoundError:
     print("\nNo previous checkpoint found. Initializing parameters")
     # # # Initialize parameters
     # Take some data
-    xs, labels = next(iter(dataloader))
+    xs, labels = next(iter(dataloader_train))
     # Generate key
     key = jax.random.key(model_config["model"]["seed"])
     # Init params and batch_stats
@@ -176,9 +204,9 @@ pprint(get_shapes(variables))
 print("\nForward pass jitted")
 
 
-def forward(params, xs, key):
+def forward(variables, xs, key):
     return model.apply(
-        {"params": params},
+        variables,
         xs,
         # key for dropout
         rngs={"dropout": key},
@@ -187,13 +215,24 @@ def forward(params, xs, key):
     )
 
 
+def forward_eval(variables, xs):
+    return model_eval.apply(
+        variables,
+        xs,
+        mutable=["batch_stats"],
+    )
+
+
 forward_jitted = jit(forward)
+forward_eval_jitted = jit(forward_eval)
 
 # test the forward pass
-xs, labels = next(iter(dataloader))
+xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
 
-(zs, neg_pmi), mutable_updates = forward_jitted(variables["params"], xs, key)
+(zs, neg_pmi), mutable_updates = forward_jitted(variables, xs, key)
+(zs, neg_pmi), _ = forward_eval_jitted(variables, xs)
+
 
 print(f"\tInput shape: {xs.shape}")
 print(f"\tOutput Info:")
@@ -202,13 +241,14 @@ print(f"\t\tneg_pmi shape: {neg_pmi.shape}")
 print(f"\t\tmean active units: {zs.sum(axis=-1).mean()}")
 print(f"\t\tstd active units: {zs.sum(axis=-1).std()}")
 
+
 pprint(get_shapes(mutable_updates))
 
 # test time for one epoch
 t0 = time()
-for xs, labels in dataloader:
+for xs, labels in dataloader_train:
     key, _ = jax.random.split(key)
-    forward_jitted(variables["params"], xs, key)
+    forward_jitted(variables, xs, key)
 
 print(f"\tTime for one epoch: {time() - t0}")
 
@@ -250,11 +290,11 @@ def flo_loss(
 flo_loss_jitted = jit(flo_loss)
 
 # test loss function
-xs, labels = next(iter(dataloader))
+xs, labels = next(iter(dataloader_train))
 
 key = jax.random.key(model_config["model"]["seed"])
 
-(zs, negpmi), _ = forward(variables["params"], xs, key)
+(zs, negpmi), _ = forward(variables, xs, key)
 
 print(zs.shape)
 print(negpmi.shape)
@@ -272,66 +312,92 @@ print("\nOptimizer and Train State")
 
 
 # add batch stats to train state
-class TrainState(train_state.TrainState):
-    batch_stats: Any
-
+optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
+optimizer = optimizer(**model_config["training"]["optimizer"]["kwargs"])
 
 if not LOADED:
-    optimizer = sbdr.config_optimizer_dict[
-        model_config["training"]["optimizer"]["type"]
-    ]
-    optimizer = optimizer(**model_config["training"]["optimizer"]["kwargs"])
-    state = TrainState.create(
-        apply_fn=model.apply,
-        params=variables["params"],
-        tx=optimizer,
-        batch_stats=variables["batch_stats"],
-    )
+    state = {
+        "variables": variables,
+        "opt_state": optimizer.init(variables["params"]),
+        "step": 0,
+    }
 
 
 @jit
 def train_step(state, batch):
     def loss_fn(params):
         (zs, negpmi), mutable_updates = forward(
-            params,
+            {
+                "params": params,
+                "batch_stats": state["variables"]["batch_stats"],
+            },
             batch["x"],
             batch["key"],
         )
-
         flo_loss_val = flo_loss_jitted(zs, negpmi)
-
         # weight_loss_val = l2_weight_loss(params["params"])
-
         loss = flo_loss_val  # + weight_loss_val
-
         return loss, {
             "flo_loss": flo_loss_val,
             "weight_loss": 0.0,
             "mutable_updates": mutable_updates,
         }
 
+    # compute gradient, loss, and aux
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
-    (loss, aux), grads = grad_fn(state.params)
-
+    (loss, aux), grads = grad_fn(state["variables"]["params"])
     # update weights
-    state = state.apply_gradients(grads=grads)
+    updates, opt_state = optimizer.update(grads, state["opt_state"])
+    state["variables"]["params"] = optax.apply_updates(
+        state["variables"]["params"], updates
+    )
+    state["opt_state"] = opt_state
+    # update batch stats
+    state["variables"]["batch_stats"] = aux["mutable_updates"]["batch_stats"]
+    # update step
+    state["step"] += 1
 
-    state = state.replace(batch_stats=aux["mutable_updates"]["batch_stats"])
-
+    # Store metrics
     metrics = {
         "loss/total": loss,
         "loss/flo": aux["flo_loss"],
         "loss/weight": aux["weight_loss"],
     }
 
-    aux = grads
-
     return state, metrics, grads
 
 
-print("\t Test one train step")
+@jit
+def eval_step(state, batch):
+    def loss_fn(variables):
+        (zs, negpmi), mutable_updates = forward_eval(
+            variables,
+            batch["x"],
+        )
+        flo_loss_val = flo_loss_jitted(zs, negpmi)
+        # weight_loss_val = l2_weight_loss(params["params"])
+        loss = flo_loss_val  # + weight_loss_val
+        return loss, {
+            "flo_loss": flo_loss_val,
+            "weight_loss": 0.0,
+            "mutable_updates": mutable_updates,
+        }
 
-xs, labels = next(iter(dataloader))
+    loss, aux = loss_fn(
+        variables=state["variables"],
+    )
+    metrics = {
+        "loss/total": loss,
+        "loss/flo": aux["flo_loss"],
+        "loss/weight": aux["weight_loss"],
+    }
+
+    return state, metrics
+
+
+print("\t Test one train step and one eval step")
+
+xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
 batch = {
     "x": xs,
@@ -339,9 +405,9 @@ batch = {
 }
 
 state, metrics, grads = train_step(state, batch)
+_, _ = eval_step(state, batch)
 
 print(f"\tLoss: {metrics['loss/total']}")
-
 
 gradients_are_finite = jax.tree_util.tree_map(
     lambda x: np.all(np.isfinite(x)).item(), grads
@@ -376,9 +442,9 @@ try:
 
     for epoch in range(model_config["training"]["epochs"]):
 
-        epoch_stats = {k: 0.0 for k in metrics.keys()}
+        epoch_metrics = {k: 0.0 for k in metrics.keys()}
 
-        for batch_idx, (xs, labels) in enumerate(dataloader):
+        for batch_idx, (xs, labels) in enumerate(dataloader_train):
 
             # random flip of images on width dimension for data augmentation
             key, _ = jax.random.split(key)
@@ -394,19 +460,52 @@ try:
 
             state, metrics, grads = train_step(state, batch)
 
-            LAST_STEP = state.step.item()
+            LAST_STEP = state["step"].item()
 
             for metric, value in metrics.items():
-                writer.add_scalar(metric, value.item(), global_step=LAST_STEP)
+                writer.add_scalar(
+                    metric + "/train/batch", value.item(), global_step=LAST_STEP
+                )
 
             for metric, value in metrics.items():
-                epoch_stats[metric] += value
+                epoch_metrics[metric] += value
 
         # take the average of the epoch stats
-        epoch_stats = jax.tree.map(lambda x: x / (batch_idx + 1), epoch_stats)
+        epoch_metrics = jax.tree.map(lambda x: x / (batch_idx + 1), epoch_metrics)
+        epoch_step = int(LAST_STEP / (batch_idx + 1))
+
+        # Log epoch stats
+        for metric, value in epoch_metrics.items():
+            writer.add_scalar(
+                metric + "/train_epoch", value.item(), global_step=epoch_step
+            )
 
         print(f"Epoch {epoch}/{model_config['training']['epochs']}:")
-        pprint(epoch_stats)
+        pprint(epoch_metrics)
+
+        # COmpute average loss on validation set
+        val_metrics = {k: 0.0 for k in metrics.keys()}
+        for val_batch_idx, (xs, labels) in enumerate(dataloader_val):
+            batch = {
+                "x": xs,
+            }
+
+            state, val_metrics = eval_step(state, batch)
+
+            for metric, value in val_metrics.items():
+                val_metrics[metric] += value
+
+        # take the average of the epoch stats
+        val_metrics = jax.tree.map(lambda x: x / (val_batch_idx + 1), val_metrics)
+
+        # Log epoch stats
+        for metric, value in val_metrics.items():
+            writer.add_scalar(
+                metric + "/val_epoch", value.item(), global_step=epoch_step
+            )
+
+        print(f"Validation:")
+        pprint(val_metrics)
 
         if (
             (epoch > 0)
@@ -417,8 +516,7 @@ try:
             checkpoint_manager.save(
                 step=LAST_STEP,
                 items={
-                    "params": state.params,
-                    "batch_stats": state.batch_stats,
+                    "state": state,
                 },
             )
 

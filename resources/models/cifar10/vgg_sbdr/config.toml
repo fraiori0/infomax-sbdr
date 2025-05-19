@@ -9,7 +9,7 @@ kernel_features = [17, 64, 128]
 use_batchnorm = true
 use_dropout = true
 dropout_rates = [0.2, 0.3, 0.3]
-training = true
+# training = true
    
 
 [dataset]
@@ -34,6 +34,10 @@ log_interval = 1
 save = false
 save_interval = 50
 max_to_keep = 5
+
+[training.early_stopping]
+patience = 20
+val_split = 0.2
 
 [training.loss.kwargs]
 weight_decay = 0.0

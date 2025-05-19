@@ -180,8 +180,8 @@ class VGGLayer(nn.Module):
         )
 
         if self.use_batchnorm:
-            self.bn1 = nn.BatchNorm(use_running_average=self.training)
-            self.bn2 = nn.BatchNorm(use_running_average=self.training)
+            self.bn1 = nn.BatchNorm(use_running_average=not self.training)
+            self.bn2 = nn.BatchNorm(use_running_average=not self.training)
 
         if self.use_dropout:
             self.dropout = nn.Dropout(
