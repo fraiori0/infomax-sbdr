@@ -35,6 +35,7 @@ config_module_dict = {
     "ConvFLONoPoolNoLast": ConvFLONoPoolNoLast,
     "ConvFLONoPool": ConvFLONoPool,
     "VGGFLO": VGGFLO,
+    "VGGFLOAutoEncoder": VGGFLOAutoEncoder,
 }
 
 config_transform_dict = {

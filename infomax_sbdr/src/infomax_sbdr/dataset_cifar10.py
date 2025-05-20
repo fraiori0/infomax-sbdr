@@ -71,8 +71,8 @@ class Cifar10Dataset(Dataset):
 
         # print the mean and std for each channel
         print(f"CIFAR10 Dataset Loaded ({kind})")
-        print(f"\tChannel Mean: {self.images.mean(dim=(0, 2, 3))}")
-        print(f"\tChannel Std: {self.images.std(dim=(0, 2, 3))}")
+        print(f"\tChannel Mean: {self.images.mean(dim=(0, 1, 2))}")
+        print(f"\tChannel Std: {self.images.std(dim=(0, 1, 2))}")
 
     def __len__(self):
         return len(self.labels)

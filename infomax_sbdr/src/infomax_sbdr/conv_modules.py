@@ -204,6 +204,55 @@ class VGGLayer(nn.Module):
         return x
 
 
+class VGGTransposeLayer(nn.Module):
+    """A transpose VGG-style module with a conv-tranpose upsampling layer followed by a conv-tranpose layer."""
+
+    kernel_features: int = None
+    kernel_sizes: Tuple[int] = (3, 3)
+    kernel_strides: Tuple[int, int] = (2, 2)
+    kernel_padding: str = "SAME"
+    # pool_sizes = None
+    # pool_strides: Tuple[int, int] = (2, 2)
+    # pool_padding = None
+    activation_fn: Callable = nn.relu
+    use_batchnorm: bool = False
+    training: bool = True
+    use_dropout = False
+    dropout_rate = None
+
+    def setup(self):
+        # we don't use a separate upsampling layer, so the first
+        # conv-transpose layer match the stride of the pooling layer
+        # this is not enough if the stride of the kernel is not 1
+        self.t_conv1 = nn.ConvTranspose(
+            features=self.kernel_features,
+            kernel_size=self.kernel_sizes,
+            strides=self.kernel_strides,
+            padding=self.kernel_padding,
+        )
+        self.t_conv2 = nn.ConvTranspose(
+            features=self.kernel_features,
+            kernel_size=self.kernel_sizes,
+            strides=(1, 1),
+            padding=self.kernel_padding,
+        )
+
+        if self.use_batchnorm:
+            self.bn1 = nn.BatchNorm(use_running_average=not self.training)
+            self.bn2 = nn.BatchNorm(use_running_average=not self.training)
+
+    def __call__(self, x):
+        x = self.t_conv1(x)
+        if self.use_batchnorm:
+            x = self.bn1(x)
+        x = self.activation_fn(x)
+        x = self.t_conv2(x)
+        if self.use_batchnorm:
+            x = self.bn2(x)
+        x = self.activation_fn(x)
+        return x
+
+
 class VGG(nn.Module):
     out_features: int
     kernel_features: Sequence[int]
@@ -245,6 +294,57 @@ class VGG(nn.Module):
         return x
 
 
+class VGGAutoEncoder(VGG):
+    deconv_in_features: int = None
+    deconv_kernel_features: Sequence[int] = None
+
+    def setup(self):
+        super().setup()
+
+        self.decoder_dense = nn.Sequential(
+            [
+                nn.Dense(features=self.deconv_in_features),
+                self.activation_fn,
+            ]
+        )
+
+        conv_transpose_layers = []
+        for f in self.deconv_kernel_features:
+            conv_transpose_layers.append(
+                VGGTransposeLayer(
+                    kernel_features=f,
+                    activation_fn=self.activation_fn,
+                    use_batchnorm=self.use_batchnorm,
+                    training=self.training,
+                ),
+            )
+
+        self.conv_transpose_layers = nn.Sequential(conv_transpose_layers)
+
+    def __call__(self, x):
+        # # Encode
+        x = self.conv_layers(x)
+        # flatten the last three dimensions (i.e., C, H, W)
+        x_f_shape = x.shape[-3:]
+        x = x.reshape((*x.shape[:-3], -1))
+        x = self.dense_layers(x)
+
+        # # Decode
+        y = self.decoder_dense(x)
+        # reshape back to (*batch_dims, C, H, W)
+        y = y.reshape((*y.shape[:-1], *x_f_shape))
+        # convolutional transpose layers
+        y = self.conv_transpose_layers(y)
+        return x, y
+
+    def encode(self, x):
+        x = self.conv_layers(x)
+        # flatten the last three dimensions (i.e., C, H, W)
+        x = x.reshape((*x.shape[:-3], -1))
+        x = self.dense_layers(x)
+        return x
+
+
 class VGGFLO(VGG):
 
     def setup(self):
@@ -258,3 +358,18 @@ class VGGFLO(VGG):
         x = self.dense_layers(x)
         negpmi = self.negpmi_layer(x)
         return x, negpmi
+
+
+class VGGFLOAutoEncoder(VGGAutoEncoder):
+
+    def setup(self):
+        super().setup()
+        self.negpmi_layer = nn.Dense(features=1)
+
+    def __call__(self, x):
+        x, y = super().__call__(x)
+        negpmi = self.negpmi_layer(x)
+        return (
+            (x, negpmi),
+            y,
+        )
