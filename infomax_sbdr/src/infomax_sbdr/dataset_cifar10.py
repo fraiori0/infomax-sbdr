@@ -5,6 +5,7 @@ from torch.utils.data import Dataset
 import pickle
 from typing import Callable, Sequence
 import torch
+from torchvision import tv_tensors
 
 
 class Cifar10Dataset(Dataset):
@@ -13,7 +14,6 @@ class Cifar10Dataset(Dataset):
         folder_path: str,
         kind: str = "train",
         transform: Callable = None,
-        flatten: bool = False,
     ) -> None:
 
         super().__init__()
@@ -54,25 +54,22 @@ class Cifar10Dataset(Dataset):
         # Perform one-hot encoding of the labels
         self.labels = onp.eye(10)[self.labels]
 
-        # Reshape images to be (C, H, W) if needed
+        # Reshape images to be (C, H, W)
         # the original from file are already flattened and are in row-major order
-        if not flatten:
-            self.images = self.images.reshape(self.images.shape[0], 3, 32, 32)
+        self.images = self.images.reshape(self.images.shape[0], 3, 32, 32)
 
-        # swap to (H, W, C), flax.linen.conv wants that
-        self.images = self.images.transpose(0, 2, 3, 1)
-
-        # convert to torch tensors
-        self.images = torch.from_numpy(self.images)
+        # convert to torchvision image
+        self.images = tv_tensors.Image(self.images)
+        # and to torch array for the labels
         self.labels = torch.from_numpy(self.labels)
 
         # convert to float and divide by 255
         self.images = self.images.float() / 255
 
-        # print the mean and std for each channel
-        print(f"CIFAR10 Dataset Loaded ({kind})")
-        print(f"\tChannel Mean: {self.images.mean(dim=(0, 1, 2))}")
-        print(f"\tChannel Std: {self.images.std(dim=(0, 1, 2))}")
+        # # print the mean and std for each channel
+        # print(f"CIFAR10 Dataset Loaded ({kind})")
+        # print(f"\tChannel Mean: {self.images.mean(dim=(0, 1, 2))}")
+        # print(f"\tChannel Std: {self.images.std(dim=(0, 1, 2))}")
 
     def __len__(self):
         return len(self.labels)
@@ -86,3 +83,29 @@ class Cifar10Dataset(Dataset):
             img = self.transform(img)
 
         return img, label
+
+
+class Cifar10DatasetContrastive(Cifar10Dataset):
+    def __init__(
+        self,
+        folder_path: str,
+        kind: str = "train",
+        transform: Callable = None,
+    ) -> None:
+        super().__init__(folder_path, kind, transform)
+
+    # we change only the __getitem__ method
+    # to apply data augmentation twice to the same image (to get two different versions)
+    def __getitem__(self, idx):
+
+        img = self.images[idx]
+        label = self.labels[idx]
+
+        if self.transform is not None:
+            img_1 = self.transform(img)
+            img_2 = self.transform(img)
+        else:
+            img_1 = img
+            img_2 = img
+
+        return (img_1, img_2), label

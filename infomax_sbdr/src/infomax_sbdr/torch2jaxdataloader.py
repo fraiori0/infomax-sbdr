@@ -28,6 +28,7 @@ class NumpyLoader(data.DataLoader):
         drop_last=False,
         timeout=0,
         worker_init_fn=None,
+        persistent_workers=False,
     ):
         super(self.__class__, self).__init__(
             dataset,
@@ -41,6 +42,7 @@ class NumpyLoader(data.DataLoader):
             drop_last=drop_last,
             timeout=timeout,
             worker_init_fn=worker_init_fn,
+            persistent_workers=persistent_workers,
         )
 
 

@@ -105,7 +105,7 @@ class ConvFLONoPoolNoLast(ConvNoPoolNoLastBase):
 
         super().setup()
 
-        # add a final layer returning the negPMI
+        # add a final layer returning the neg_pmi
         self.neg_pmi_layer = nn.Dense(features=1)
 
     def __call__(self, x):
@@ -114,9 +114,9 @@ class ConvFLONoPoolNoLast(ConvNoPoolNoLastBase):
         x = x.reshape((*x.shape[:-3], -1))
         # sigmoid
         x = nn.sigmoid(x)
-        # negPMI
-        negpmi = self.neg_pmi_layer(x)
-        return x, negpmi
+        # neg_pmi
+        neg_pmi = self.neg_pmi_layer(x)
+        return x, neg_pmi
 
 
 class ConvFLONoPool(ConvNoPoolBase):
@@ -127,7 +127,7 @@ class ConvFLONoPool(ConvNoPoolBase):
         super().setup()
         # add a final dense layer
         self.final_dense = nn.Dense(features=self.output_features)
-        # add a final layer returning the negPMI
+        # add a final layer returning the neg_pmi
         self.neg_pmi_layer = nn.Dense(features=1)
 
     def __call__(self, x):
@@ -138,9 +138,9 @@ class ConvFLONoPool(ConvNoPoolBase):
         x = self.final_dense(x)
         # sigmoid
         x = nn.sigmoid(x)
-        # negPMI
-        negpmi = self.neg_pmi_layer(x)
-        return x, negpmi
+        # neg_pmi
+        neg_pmi = self.neg_pmi_layer(x)
+        return x, neg_pmi
 
 
 class VGGLayer(nn.Module):
@@ -291,7 +291,7 @@ class VGG(nn.Module):
         # flatten the last three dimensions (i.e., C, H, W)
         x = x.reshape((*x.shape[:-3], -1))
         x = self.dense_layers(x)
-        return x
+        return {"z": x}
 
 
 class VGGAutoEncoder(VGG):
@@ -335,41 +335,38 @@ class VGGAutoEncoder(VGG):
         y = y.reshape((*y.shape[:-1], *x_f_shape))
         # convolutional transpose layers
         y = self.conv_transpose_layers(y)
-        return x, y
+        return {"z": x, "x_rec": y}
 
     def encode(self, x):
         x = self.conv_layers(x)
         # flatten the last three dimensions (i.e., C, H, W)
         x = x.reshape((*x.shape[:-3], -1))
         x = self.dense_layers(x)
-        return x
+        return {"z": x}
 
 
 class VGGFLO(VGG):
 
     def setup(self):
         super().setup()
-        self.negpmi_layer = nn.Dense(features=1)
+        self.neg_pmi_layer = nn.Dense(features=1)
 
     def __call__(self, x):
-        x = self.conv_layers(x)
-        # flatten the last three dimensions (i.e., C, H, W)
-        x = x.reshape((*x.shape[:-3], -1))
-        x = self.dense_layers(x)
-        negpmi = self.negpmi_layer(x)
-        return x, negpmi
+        outs = super().__call__(x)
+        z = outs["z"]
+        neg_pmi = self.neg_pmi_layer(z)
+        return {"z": z, "neg_pmi": neg_pmi}
 
 
 class VGGFLOAutoEncoder(VGGAutoEncoder):
 
     def setup(self):
         super().setup()
-        self.negpmi_layer = nn.Dense(features=1)
+        self.neg_pmi_layer = nn.Dense(features=1)
 
     def __call__(self, x):
-        x, y = super().__call__(x)
-        negpmi = self.negpmi_layer(x)
-        return (
-            (x, negpmi),
-            y,
-        )
+        outs = super().__call__(x)
+        z = outs["z"]
+        x_rec = outs["x_rec"]
+        neg_pmi = self.neg_pmi_layer(z)
+        return {"z": z, "neg_pmi": neg_pmi, "x_rec": x_rec}
