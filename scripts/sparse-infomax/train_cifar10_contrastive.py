@@ -158,6 +158,30 @@ dataloader_val = sbdr.NumpyLoader(
 print(f"\tInput xs: {xs_1.shape} (dtype: {xs_1.dtype})")
 print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
 
+# Create a dataset with the original images
+transform_original = tv_transforms.Compose(
+    [
+        tv_transforms.Normalize(
+            mean=model_config["dataset"]["transform"]["normalization"]["mean"],
+            std=model_config["dataset"]["transform"]["normalization"]["std"],
+        ),
+        # change from  (C, H, W) to (H, W, C)
+        tv_transforms.Lambda(lambda x: x.movedim(-3, -1)),
+    ]
+)
+dataset_original = sbdr.Cifar10Dataset(
+    folder_path=data_folder,
+    kind="train",
+    transform=transform_original,
+)
+
+dataloader_original = sbdr.NumpyLoader(
+    dataset_original,
+    batch_size=16,
+    shuffle=model_config["training"]["dataloader"]["shuffle"],
+    drop_last=model_config["training"]["dataloader"]["drop_last"],
+)
+
 
 """---------------------"""
 """ Visualize the images"""
@@ -570,6 +594,24 @@ pprint(gradients_are_zero)
 print(f"\tGradients are NAN:")
 pprint(gradients_are_nan)
 
+"""------------------"""
+""" Logging Utils """
+"""------------------"""
+
+
+def activation_to_img(z):
+    # compute width and height to get an approximate square
+    n_height = np.sqrt(z.shape[-1]).astype(int)
+    n_width = z.shape[-1] // n_height + int(not (z.shape[-1] % n_height) == 0)
+    # pad z with zero if necessary, so we can then reshape the feature dimension (last)
+    # to the given width and height
+    pad_width = [(0, 0)] * (len(z.shape) - 1)
+    pad_width.append((0, n_height * n_width - z.shape[-1]))
+    z = np.pad(z, pad_width, mode="constant", constant_values=0.0)
+    # also a dummy final dimension, like it's grayscale
+    z = z.reshape((*z.shape[:-1], n_height, n_width, 1))
+    return onp.array(z)
+
 
 """------------------"""
 """ Training """
@@ -656,6 +698,19 @@ try:
             checkpoint_manager.save(
                 step=epoch_step,
                 args=orbax.checkpoint.args.StandardSave(state),
+            )
+
+        # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
+        xs_original, labels_original = next(iter(dataloader_original))
+        outs, _ = forward_eval_jitted(state["variables"], xs_original)
+        # convert to images
+        activation_img = activation_to_img(outs["z"])
+        for i in range(activation_img.shape[0]):
+            writer.add_image(
+                f"activation/img/{i+1}",
+                activation_img[i],
+                global_step=epoch_step,
+                dataformats="HWC",
             )
 
 
