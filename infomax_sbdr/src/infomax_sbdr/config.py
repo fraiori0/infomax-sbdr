@@ -18,6 +18,7 @@ config_activation_dict = {
     "selu": nn.selu,
     "gelu": nn.gelu,
     "leaky_relu": nn.leaky_relu,
+    "identity": lambda x: x,
 }
 
 config_optimizer_dict = {
@@ -36,6 +37,7 @@ config_module_dict = {
     "ConvFLONoPool": ConvFLONoPool,
     "VGGFLO": VGGFLO,
     "VGGFLOAutoEncoder": VGGFLOAutoEncoder,
+    "VGGFLOKSoftMax": VGGFLOKSoftMax,
 }
 
 config_transform_dict = {
@@ -45,4 +47,6 @@ config_transform_dict = {
 
 config_similarity_dict = {
     "jaccard": bc.proxy_jaccard_index,
+    "and": bc.expected_and,
+    "cosine_normalized": bc.cosine_similarity_normalized,
 }

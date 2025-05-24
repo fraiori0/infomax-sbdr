@@ -370,3 +370,28 @@ class VGGFLOAutoEncoder(VGGAutoEncoder):
         x_rec = outs["x_rec"]
         neg_pmi = self.neg_pmi_layer(z)
         return {"z": z, "neg_pmi": neg_pmi, "x_rec": x_rec}
+
+
+class VGGFLOKSoftMax(VGG):
+    k_softmax: int = None
+
+    def setup(self):
+        assert self.out_features % self.k_softmax == 0
+        self.k_shape = (self.k_softmax, self.out_features // self.k_softmax)
+
+        super().setup()
+
+        self.neg_pmi_layer = nn.Dense(features=1)
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        z = outs["z"]
+        # reshape
+        z = z.reshape((*z.shape[:-1], *self.k_shape))
+        # apply softmax
+        z = jax.nn.softmax(z, axis=-1)
+        # flatten
+        z = z.reshape((*z.shape[:-2], -1))
+        # compute neg pmi
+        neg_pmi = self.neg_pmi_layer(z)
+        return {"z": z, "neg_pmi": neg_pmi}

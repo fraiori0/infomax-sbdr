@@ -13,7 +13,7 @@ import colorsys
 from functools import partial
 
 """
-Version implementing non-uniform sampling of which units are active.
+Version implementing non-uniform sampling of which units are active, and also considering noise.
 """
 # non uniform
 

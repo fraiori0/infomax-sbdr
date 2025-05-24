@@ -327,6 +327,12 @@ def active_kl_divergence(px1, px2, eps=1.0e-6):
     return (px1 * (np.log(px1 + eps) - np.log(px2 + eps))).sum(axis=-1)
 
 
+def cosine_similarity_normalized(x1, x2, eps=1.0e-6):
+    x1_normalized = x1 / (np.linalg.norm(x1, axis=-1, keepdims=True) + eps)
+    x2_normalized = x2 / (np.linalg.norm(x2, axis=-1, keepdims=True) + eps)
+    return (x1_normalized * x2_normalized).sum(axis=-1)
+
+
 def circulant(v: np.ndarray) -> np.ndarray:
     """
     Create a circulant matrix from a 1D array.

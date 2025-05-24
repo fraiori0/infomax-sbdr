@@ -1,0 +1,73 @@
+[model]
+type = "VGGFLOKSoftMax"
+seed = 42
+activation = "leaky_relu"
+out_activation = "identity"
+[model.kwargs]
+out_features = 255
+k_softmax = 5
+kernel_features = [32, 64, 128]
+use_batchnorm = true
+use_dropout = true
+dropout_rates = [0.2, 0.25, 0.3]
+# training = true
+   
+[dataset]
+[dataset.transform.normalization]
+mean = [0.4914, 0.4822, 0.4465]
+std = [0.2470, 0.2435, 0.2616]
+[dataset.transform.resized_crop]
+size = 32
+scale = [0.5, 1.0]
+ratio = [0.75, 1.33]
+[dataset.transform.flip]
+p = 0.5
+[dataset.transform.grayscale]
+p = 0.1
+[dataset.transform.color_jitter]
+brightness = 0.15
+contrast = 0.15
+saturation = 0.15
+hue = 0.15
+[dataset.transform.gaussian_noise]
+sigma=0.1
+
+[training]
+epochs = 100
+batch_size = 64
+
+[training.checkpoint]
+save = true
+save_interval = 2 # epochs
+max_to_keep = 10
+
+[training.dataloader]
+shuffle = true
+# drop the last batch to avoid recompiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+
+[training.loss.kwargs]
+weight_decay = 0.001
+[training.loss.sim_fn]
+type = "jaccard"
+[training.loss.sim_fn.kwargs]
+eps = 1.0e0
+
+[training.optimizer]
+type = "adam"
+[training.optimizer.kwargs]
+learning_rate = 0.001
+
+[validation]
+split = 0.2
+eval_interval = 8
+[validation.dataloader]
+batch_size = 256
+[validation.sim_fn]
+type = "jaccard"
+quantile = 0.9
+[validation.sim_fn.kwargs]
+eps = 1.0e-6
+
+

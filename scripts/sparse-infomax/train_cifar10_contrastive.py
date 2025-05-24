@@ -28,7 +28,8 @@ from tqdm import tqdm
 
 np.set_printoptions(precision=4, suppress=True)
 
-default_model = "vgg_sbdr"
+default_model = "tmp"
+default_number = "1"
 
 # base folder
 base_folder = os.path.join(
@@ -46,11 +47,18 @@ base_folder = os.path.normpath(base_folder)
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 parser.add_argument(
-    "-n",
-    "--name",
+    "-m",
+    "--model",
     type=str,
     help="Name of model to train",
     default=default_model,
+)
+parser.add_argument(
+    "-n",
+    "--number",
+    type=str,
+    help="Number of model to train",
+    default=default_number,
 )
 
 args = parser.parse_args()
@@ -64,7 +72,8 @@ model_folder = os.path.join(
     "resources",
     "models",
     "cifar10",
-    args.name,
+    args.model,
+    args.number,
 )
 
 # import the elman_config.toml
@@ -173,6 +182,15 @@ dataset_original = sbdr.Cifar10Dataset(
     folder_path=data_folder,
     kind="train",
     transform=transform_original,
+)
+# use same split and keep only the originals from the train set
+dataset_original, _ = torch.utils.data.random_split(
+    dataset_original,
+    [
+        1 - model_config["validation"]["split"],
+        model_config["validation"]["split"],
+    ],
+    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
 )
 
 dataloader_original = sbdr.NumpyLoader(
@@ -353,8 +371,8 @@ def flo_loss(
     u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
     u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
     # compute FLO estimator
-    flo_loss_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
-    flo_loss_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
+    flo_loss_1 = -sbdr.flo_original(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
+    flo_loss_2 = -sbdr.flo_original(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
     flo_loss = (flo_loss_1 + flo_loss_2) / 2
     flo_loss = flo_loss.mean()
 
