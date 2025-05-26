@@ -31,9 +31,10 @@ import matplotlib.pyplot as plt
 
 # np.set_printoptions(precision=4, suppress=True)
 
-default_model = "vgg_sbdr_first_test"  # "vgg_sbdr_5softmax/1"  #
+default_model = "vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"
 default_checkpoint_subfolder = "manual_select"  # "checkpoints"
-default_step = 112  # 102
+default_step = 84  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -51,11 +52,18 @@ base_folder = os.path.normpath(base_folder)
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 parser.add_argument(
-    "-n",
-    "--name",
+    "-m",
+    "--model",
     type=str,
     help="Name of model to train",
     default=default_model,
+)
+parser.add_argument(
+    "-n",
+    "--number",
+    type=str,
+    help="Number of model to train",
+    default=default_number,
 )
 
 args = parser.parse_args()
@@ -69,7 +77,8 @@ model_folder = os.path.join(
     "resources",
     "models",
     "cifar10",
-    args.name,
+    args.model,
+    args.number,
 )
 
 # import the elman_config.toml
@@ -365,15 +374,13 @@ print(f"\tHigh: {count_high}")
 
 # # # Unusued units
 # Count the relative number of units that are never active above some threshold
-th_active = 0.1
+th_active = 0.5
 count_activated = (zs > th_active).sum(axis=(0))
 used_less_than = np.array((1.0, 2.0, 5.0, 10.0, 20.0))
 count_unused = (count_activated[None, :] < used_less_than[:, None]).sum(axis=-1)
 print(f"\nUnused units:")
 print(f"\tUsed less than: {used_less_than}")
 print(f"\tUnused: {count_unused}")
-
-exit()
 
 
 """---------------------"""
@@ -387,14 +394,14 @@ sim_fn = partial(
 
 
 # # # Similarity matrix between semantic labels (normalizing and using dot-product)
-# sem_labels = sem_labels / np.linalg.norm(sem_labels, axis=-1, keepdims=True)
-# label_sims = (sem_labels[:, None] * sem_labels[None, :]).sum(axis=-1)
+sem_labels = sem_labels / np.linalg.norm(sem_labels, axis=-1, keepdims=True)
+label_sims = (sem_labels[:, None] * sem_labels[None, :]).sum(axis=-1)
 
 # # # Similarity matrix between semantic labels (setting 90th percentile to 1 and using jaccard index)
 # for each label, compute the 90th percentile of activity (in that label)
-q = model_config["validation"]["sim_fn"]["quantile"]
-sem_thresh = np.quantile(sem_labels, q, axis=-1)
-sem_labels = (sem_labels > sem_thresh[:, None]).astype(np.float32)
+# q = model_config["validation"]["sim_fn"]["quantile"]
+# sem_thresh = np.quantile(sem_labels, q, axis=-1)
+# sem_labels = (sem_labels > sem_thresh[:, None]).astype(np.float32)
 # # keep only the features shared with less then 2.5 labels
 # print(sem_labels.mean(axis=-1))
 # sem_labels = sem_labels * (sem_labels.sum(axis=0, keepdims=True) < 2.5)

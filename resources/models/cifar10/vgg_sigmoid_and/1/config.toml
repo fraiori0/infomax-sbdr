@@ -62,9 +62,9 @@ eval_interval = 8
 [validation.dataloader]
 batch_size = 256
 [validation.sim_fn]
-type = "jaccard"
+type = "and"
 quantile = 0.9
 [validation.sim_fn.kwargs]
-eps = 1.0e-6
+# eps = 1.0e-6
 
 

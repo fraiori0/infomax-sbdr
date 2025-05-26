@@ -371,8 +371,8 @@ def flo_loss(
     u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
     u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
     # compute FLO estimator
-    flo_loss_1 = -sbdr.flo_original(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
-    flo_loss_2 = -sbdr.flo_original(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
+    flo_loss_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
+    flo_loss_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
     flo_loss = (flo_loss_1 + flo_loss_2) / 2
     flo_loss = flo_loss.mean()
 
