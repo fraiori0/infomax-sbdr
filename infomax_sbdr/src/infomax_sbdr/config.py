@@ -46,7 +46,7 @@ config_transform_dict = {
 }
 
 config_similarity_dict = {
-    "jaccard": bc.proxy_jaccard_index,
+    "jaccard": bc.jaccard_index,
     "and": bc.expected_and,
     "cosine_normalized": bc.cosine_similarity_normalized,
 }
