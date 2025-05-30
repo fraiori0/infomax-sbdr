@@ -1,0 +1,474 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 210 297"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.2 (1:1.4.2+202505120738+ebf0e940d0)"
+   sodipodi:docname="architecture.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="2.8749921"
+     inkscape:cx="497.56659"
+     inkscape:cy="288.87036"
+     inkscape:window-width="2490"
+     inkscape:window-height="1369"
+     inkscape:window-x="70"
+     inkscape:window-y="34"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1"
+     showgrid="false" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <rect
+       style="fill:none;stroke:#000000;stroke-width:0.25"
+       id="rect1"
+       width="7.1873612"
+       height="18.231358"
+       x="-55.463306"
+       y="17.579445"
+       rx="1.6565263"
+       ry="1.6565263"
+       transform="rotate(-90)" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       x="55.868862"
+       y="84.967468"
+       id="text326-2-6-5-0-2-6-9"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+         x="55.868862"
+         y="84.967468"
+         sodipodi:role="line"
+         id="tspan329-1-9-4">32, 3x3 Conv, Leaky ReLU</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       x="53.771236"
+       y="78.830444"
+       id="text326-2-6-5-0-2-5-8-3"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+         x="53.771236"
+         y="78.830444"
+         sodipodi:role="line"
+         id="tspan329-1-0-7-5">32, Sigmoid</tspan></text>
+    <rect
+       style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:none"
+       id="rect1-5-4-4-4-7-6-4"
+       width="31.125996"
+       height="2.9314969"
+       x="54.325596"
+       y="82.959854"
+       rx="0.73623335"
+       ry="0.73623335" />
+    <g
+       id="g17"
+       transform="translate(0,-1.7382812)"
+       inkscape:export-filename="vgg_base.png"
+       inkscape:export-xdpi="400"
+       inkscape:export-ydpi="400">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="121.3849"
+         y="84.260628"
+         id="text326-2-6-5-0-2-6-9-8-5-3"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="121.3849"
+           y="84.260628"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-2">Dropout, p0.2</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-0"
+         width="31.125996"
+         height="2.9314969"
+         x="113.40591"
+         y="82.26783"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <g
+       id="g15"
+       transform="translate(-2.0149307,0.28715948)">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="122.74472"
+         y="73.757378"
+         id="text326-2-6-5-0-2-6-9-8-5-3-3"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="122.74472"
+           y="73.757378"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-2-3">Dropout, p0.25</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-0-8"
+         width="31.125996"
+         height="2.9314969"
+         x="115.42084"
+         y="71.76458"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <g
+       id="g14"
+       transform="translate(-3.867012,1.5989313)">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="125.25508"
+         y="63.967796"
+         id="text326-2-6-5-0-2-6-9-8-5-3-6"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="125.25508"
+           y="63.967796"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-2-8">Dropout, p0.3</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-0-7"
+         width="31.125996"
+         height="2.9314969"
+         x="117.27292"
+         y="61.974998"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       x="56.425728"
+       y="70.663315"
+       id="text326-2-6-5-0-2-6-9-9"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+         x="56.425728"
+         y="70.663315"
+         sodipodi:role="line"
+         id="tspan329-1-9-4-1">32, ELU</tspan></text>
+    <rect
+       style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:none"
+       id="rect1-5-4-4-4-7-6-4-2"
+       width="26.961227"
+       height="3.061646"
+       x="47.158333"
+       y="68.589584"
+       rx="0.73623335"
+       ry="0.73623335" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       x="56.161144"
+       y="63.784145"
+       id="text326-2-6-5-0-2-6-9-6"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+         x="56.161144"
+         y="63.784145"
+         sodipodi:role="line"
+         id="tspan329-1-9-4-0">32, ELU</tspan></text>
+    <rect
+       style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:none"
+       id="rect1-5-4-4-4-7-6-4-6"
+       width="26.961227"
+       height="3.061646"
+       x="46.893749"
+       y="61.710415"
+       rx="0.73623335"
+       ry="0.73623335" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+       x="54.573647"
+       y="55.846645"
+       id="text326-2-6-5-0-2-6-9-7"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+         x="54.573647"
+         y="55.846645"
+         sodipodi:role="line"
+         id="tspan329-1-9-4-9">32, ELU</tspan></text>
+    <rect
+       style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:none"
+       id="rect1-5-4-4-4-7-6-4-20"
+       width="26.961227"
+       height="3.061646"
+       x="45.306252"
+       y="53.772915"
+       rx="0.73623335"
+       ry="0.73623335" />
+    <rect
+       style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:none"
+       id="rect1-5-4-4-4-7-8-0-6"
+       width="26.961227"
+       height="3.061646"
+       x="46.601467"
+       y="76.770432"
+       rx="0.73623335"
+       ry="0.73623335" />
+    <g
+       id="g21"
+       transform="translate(0,-2.6458334)">
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none;stroke-dashoffset:0"
+         id="rect1-5-4-4-4-05-2-7"
+         width="34.376808"
+         height="24.043543"
+         x="111.78051"
+         y="86.620537"
+         rx="1.4264532"
+         ry="1.4264531" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="114.94918"
+         y="103.54553"
+         id="text326-2-6-5-0-2-6-9-8"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="114.94918"
+           y="103.54553"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97">32, 3x3 Conv, Leaky ReLU</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:0.25, 0.25;stroke-dashoffset:0"
+         id="rect1-5-4-4-4-7-6-4-3"
+         width="31.125996"
+         height="2.9314969"
+         x="113.40591"
+         y="101.53791"
+         rx="0.73623335"
+         ry="0.73623335" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="114.94918"
+         y="94.822754"
+         id="text326-2-6-5-0-2-6-9-8-3"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="114.94918"
+           y="94.822754"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-1">32, 3x3 Conv, Leaky ReLU</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:0.25, 0.25;stroke-dashoffset:0"
+         id="rect1-5-4-4-4-7-6-4-3-9"
+         width="31.125996"
+         height="2.9314969"
+         x="113.40591"
+         y="92.815132"
+         rx="0.73623335"
+         ry="0.73623335" />
+      <g
+         id="g20">
+        <rect
+           style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:0.25, 0.25;stroke-dashoffset:0"
+           id="rect1-5-4-4-4-7-6-4-3-9-3"
+           width="31.125996"
+           height="2.9314969"
+           x="113.40591"
+           y="88.453743"
+           rx="0.73623335"
+           ry="0.73623335" />
+        <text
+           xml:space="preserve"
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+           x="116.95472"
+           y="90.477234"
+           id="text326-2-6-5-0-2-6-9-8-5"><tspan
+             style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+             x="116.95472"
+             y="90.477234"
+             sodipodi:role="line"
+             id="tspan329-1-9-4-97-0">2x2, MaxPool, stride 2</tspan></text>
+      </g>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="117.4733"
+         y="108.13128"
+         id="text326-2-6-5-0-2-6-9-8-5-4"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="117.4733"
+           y="108.13128"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-4">Batch Normalization</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:0.25, 0.25;stroke-dashoffset:0"
+         id="rect1-5-4-4-4-7-6-4-3-3-3"
+         width="31.125996"
+         height="2.9314969"
+         x="113.40591"
+         y="105.8993"
+         rx="0.73623335"
+         ry="0.73623335" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="117.4733"
+         y="99.408508"
+         id="text326-2-6-5-0-2-6-9-8-5-8"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="117.4733"
+           y="99.408508"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-8">Batch Normalization</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.125;stroke-dasharray:0.25, 0.25;stroke-dashoffset:0"
+         id="rect1-5-4-4-4-7-6-4-3-3-4"
+         width="31.125996"
+         height="2.9314969"
+         x="113.40591"
+         y="97.176521"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <g
+       id="g16"
+       transform="translate(1.0560532,-1.7960366)">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="119.33506"
+         y="79.285728"
+         id="text326-2-6-5-0-2-6-9-8-5-4-3"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="119.33506"
+           y="79.285728"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-4-6">VGG Layer - 64</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-3-0"
+         width="31.125996"
+         height="2.9314969"
+         x="112.34985"
+         y="77.292931"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <g
+       id="g13"
+       transform="translate(19.063904,6.8961711)">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="100.97479"
+         y="62.115715"
+         id="text326-2-6-5-0-2-6-9-8-5-4-3-3"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="100.97479"
+           y="62.115715"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-4-6-1">VGG Layer - 128</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-3-0-4"
+         width="31.125996"
+         height="2.9314969"
+         x="94.342003"
+         y="60.122913"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <g
+       id="g18"
+       transform="translate(10.596169,20.216219)">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="112.35188"
+         y="39.361546"
+         id="text326-2-6-5-0-2-6-9-8-5-4-3-3-6"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25"
+           x="112.35188"
+           y="39.361546"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-4-6-1-4">256, Dense</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-3-0-4-1"
+         width="31.125996"
+         height="2.9314969"
+         x="102.80974"
+         y="37.352875"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <g
+       id="g19"
+       transform="translate(25.766335,25.929177)">
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+         x="90.847595"
+         y="29.044914"
+         id="text326-2-6-5-0-2-6-9-8-5-4-3-3-6-2"><tspan
+           style="font-style:normal;font-variant:normal;font-weight:300;font-stretch:normal;font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Light';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none"
+           x="90.847595"
+           y="29.044914"
+           sodipodi:role="line"
+           id="tspan329-1-9-4-97-0-4-6-1-4-8">Sigmoid or K-SoftMax</tspan></text>
+      <rect
+         style="fill:none;stroke:#000000;stroke-width:0.25;stroke-dasharray:none"
+         id="rect1-5-4-4-4-7-6-4-3-3-3-0-4-1-8"
+         width="31.125996"
+         height="2.9314969"
+         x="87.639572"
+         y="27.049999"
+         rx="0.73623335"
+         ry="0.73623335" />
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Normal';text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.25"
+       x="-95.990128"
+       y="109.43452"
+       id="text8"
+       transform="rotate(-90)"><tspan
+         sodipodi:role="line"
+         id="tspan8"
+         style="fill:#000000;stroke:none;stroke-width:0.25"
+         x="-95.990128"
+         y="109.43452">VGG Layer - 32</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Normal';text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none;stroke-dashoffset:0"
+       x="128.9234"
+       y="113.65611"
+       id="text21"><tspan
+         sodipodi:role="line"
+         id="tspan21"
+         style="stroke-width:0.25"
+         x="128.9234"
+         y="113.65611">input</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;line-height:1.1;font-family:'Styrene A Trial';-inkscape-font-specification:'Styrene A Trial, Normal';text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.25;stroke-dasharray:none;stroke-dashoffset:0"
+       x="128.9615"
+       y="48.821514"
+       id="text22"><tspan
+         sodipodi:role="line"
+         id="tspan22"
+         style="stroke-width:0.25"
+         x="128.9615"
+         y="48.821514">output</tspan></text>
+  </g>
+</svg>

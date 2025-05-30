@@ -32,9 +32,9 @@ import matplotlib.pyplot as plt
 # np.set_printoptions(precision=4, suppress=True)
 
 default_model = "vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "1"
+default_number = "3"
 default_checkpoint_subfolder = "manual_select"  # "checkpoints"
-default_step = 84  # 102
+default_step = 60  # 102
 
 # base folder
 base_folder = os.path.join(

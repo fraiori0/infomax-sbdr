@@ -45,7 +45,7 @@ def bernoulli_entropy_stable(p):
     return -(p * np.log(p + 1e-6) + (1 - p) * np.log(1 - p + 1e-6)).sum(axis=-1)
 
 
-def bernoulli_crossentropy_stable(p, q):
+def negative_bernoulli_crossentropy_stable(p, q, eps=1e-6):
     """Compute the cross-entropy between two multivariate Bernoulli distribution
     Args:
         p (ndarray): probabilities of being =1 of each element of the first multivariate bernoulli distribution
@@ -53,8 +53,11 @@ def bernoulli_crossentropy_stable(p, q):
 
     Returns:
         (ndarray): cross-entropy
+
+    Warning:
+        This is the negative of the crossentropy, not the crossentropy. The higher the negative crossentropy, the more similar the two distributions.
     """
-    return -(p * np.log(q + 1e-6) + (1 - p) * np.log(1 - q + 1e-6)).sum(axis=-1)
+    return (p * np.log(q + eps) + (1 - p) * np.log(1 - q + eps)).sum(axis=-1)
 
 
 def expected_and(px1, px2):
@@ -104,6 +107,20 @@ def jaccard_index(px1, px2, eps=1.0):
     p(px1 | px2) = E(AND(px1, px2)) / E(OR(px1, px2))
     """
     return (expected_and(px1, px2) + eps) / (expected_or(px1, px2) + eps)
+
+
+def jaccard_index(px1, px2, eps=1.0):
+    """
+    p(px1 | px2) = E(AND(px1, px2)) / E(OR(px1, px2))
+    """
+    return (expected_and(px1, px2) + eps) / (expected_or(px1, px2) + eps)
+
+
+def asymmetric_jaccard_index(px1, px2, eps=1.0e-2):
+    """
+    p(px1 | px2) = E(AND(px1, px2)) / E(|px2|)
+    """
+    return (expected_and(px1, px2) + eps) / (px2.sum(axis=-1) + eps)
 
 
 def active_crossentropy(px1, px2, eps=1.0e-6):

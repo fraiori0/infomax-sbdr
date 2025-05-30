@@ -14,9 +14,6 @@ import json
 
 if __name__ == "__main__":
 
-    EPS = 1e-2
-    SAVE_NAME = "sharpness_512_eps1e-2"
-
     SAVE = True
 
     save_folder = os.path.join(
@@ -31,16 +28,16 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    N_SEEDS = 30
+    N_SEEDS = 3
     SEEDS = 50 * np.arange(N_SEEDS)
 
     # Number of features (i.e., dimension of a single sample)
     N_FEATURES = 512
 
     # Number of samples drawn from the gamma distribution
-    N_GAMMA_SAMPLES = 100
+    N_GAMMA_SAMPLES = 10
     # Number of binary samples drawn from each gamma distribution
-    N_SINGLE_MASK_SAMPLES = 100
+    N_SINGLE_MASK_SAMPLES = 10
     # Expected number of non-zero units after Bernoulli-sampling from N_FEATURES gamma-distributed probabilities over
     GAMMA_AVERAGE_NON_ZERO = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     # Concentration of the gamma distribution
@@ -54,14 +51,30 @@ if __name__ == "__main__":
         (0.9, 1.0),
     ]
 
-    MIs = []
+    SAVE_NAME = (
+        f"sharpness_f{N_FEATURES}_s{N_GAMMA_SAMPLES*N_SINGLE_MASK_SAMPLES}_multi"
+    )
+
+    sim_fns = {
+        "jaccard_1e-6": jit(partial(sbdr.jaccard_index, eps=1e-6)),
+        "jaccard_1e-2": jit(partial(sbdr.jaccard_index, eps=1e-2)),
+        "jaccard_1e0": jit(partial(sbdr.jaccard_index, eps=1e0)),
+        "and": jit(sbdr.expected_and),
+        "asymmetric_1e-2": jit(partial(sbdr.asymmetric_jaccard_index, eps=1e-2)),
+        "neg_crossentropy_1e-6": jit(
+            partial(sbdr.negative_bernoulli_crossentropy_stable, eps=1e-6)
+        ),
+    }
+
+    MIs = {sim_name: [] for sim_name in sim_fns.keys()}
 
     verbose = False
     disable_tqdm = verbose
 
     for n_nonzero in tqdm(GAMMA_AVERAGE_NON_ZERO, disable=disable_tqdm):
 
-        MIs.append([])
+        for k in MIs.keys():
+            MIs[k].append([])
 
         if verbose:
             print(f"\nn_nonzero: {n_nonzero}")
@@ -70,7 +83,8 @@ if __name__ == "__main__":
             tqdm(UNIFORM_RANGE, leave=False, disable=disable_tqdm)
         ):
 
-            MIs[-1].append([])
+            for k in MIs.keys():
+                MIs[k][-1].append([])
 
             if verbose:
                 print(f"  uniform_range: {uniform_range}")
@@ -123,36 +137,37 @@ if __name__ == "__main__":
                 # print(zs.mean(), zs.std(), zs.min(), zs.max())
                 # zs = np.clip(zs, 0.001, 1)
 
-                sim_fn = jit(partial(sbdr.jaccard_index, eps=EPS))
-                # self-similarity
-                p_ii = sim_fn(zs, zs)
-                # cross-similarity
-                p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...])
+                for sim_name, sim_fn in sim_fns.items():
+                    # self-similarity
+                    p_ii = sim_fn(zs, zs)
+                    # cross-similarity
+                    p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...])
 
-                # check for nans in p_ij
-                # if np.any(np.isnan(p_ij)):
-                #     raise ValueError("p_ij has nan")
+                    # check for nans in p_ij
+                    # if np.any(np.isnan(p_ij)):
+                    #     raise ValueError("p_ij has nan")
 
-                # apply exponential if needed (depends on what we consider the critic to be)
-                # p_ii = np.exp(p_ii)
-                # p_ij = np.exp(p_ij)
+                    if ("and" in sim_name) or ("crossentropy" in sim_name):
+                        # apply exponential if needed (depends on what we consider the critic to be)
+                        p_ii = np.exp(p_ii)
+                        p_ij = np.exp(p_ij)
 
-                # Compute InfoNCE k-sample estimator
-                pmis = np.log(p_ii / (p_ij.mean(axis=-1) + 1e-6) + 1e-6)
-                # if np.any(np.isnan(pmis)):
-                #     raise ValueError("pmis has nan")
+                    # Compute InfoNCE k-sample estimator
+                    pmis = np.log(p_ii / (p_ij.mean(axis=-1) + 1e-6) + 1e-6)
+                    # if np.any(np.isnan(pmis)):
+                    #     raise ValueError("pmis has nan")
 
-                mi = pmis.mean(axis=-1)
+                    mi = pmis.mean(axis=-1)
 
-                MIs[-1][-1].append(mi)
+                    MIs[sim_name][-1][-1].append(mi.item())
 
-    MIs = np.array(MIs)
-    print(f"MIs.shape: {MIs.shape}")
+    for sim_name in sim_fns.keys():
+        print(f"MIs.shape: {np.array(MIs[sim_name]).shape}")
 
     # create save dictionary
 
     data = {
-        "MI": MIs.tolist(),
+        "MI": MIs,
         "n_nonzero": GAMMA_AVERAGE_NON_ZERO,
         "gamma_concentration": GAMMA_CONCENTRATION,
         "uniform_range": UNIFORM_RANGE,
