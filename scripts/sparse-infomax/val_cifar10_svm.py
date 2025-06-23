@@ -28,6 +28,7 @@ from tqdm import tqdm
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 
+from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
@@ -131,7 +132,7 @@ dataset_train, dataset_val = torch.utils.data.random_split(
 dataloader_train = sbdr.NumpyLoader(
     dataset_train,
     batch_size=model_config["training"]["batch_size"],
-    shuffle=model_config["training"]["dataloader"]["shuffle"],
+    shuffle=False,
     drop_last=False,
 )
 
@@ -292,24 +293,27 @@ pprint(get_shapes(outs))
 # print(f"\tTime for one epoch: {time() - t0}")
 
 """---------------------"""
-""" Semantic Labels and Unit Activity """
+""" Forward pass on training set """
 """---------------------"""
 
-print("\nGenerate semantic labels from train set (and recording unit activity)")
+print("\nForward pass on the whole training set")
 
 xs, labels = next(iter(dataloader_train))
 outs, _ = forward_eval_jitted(variables, xs)
 sem_labels = np.zeros((labels.shape[-1], outs["z"].shape[-1]))
 label_count = np.zeros(labels.shape[-1])
 
-# generate also the entire encoded dataset, so we can compute statistics on unit activity
+
+# record output and labels
 zs = []
+labels_onehot = []
 
 for xs, labels in tqdm(dataloader_train):
     # encode using a forward pass
     outs, _ = forward_eval_jitted(variables, xs)
 
     zs.append(outs["z"])
+    labels_onehot.append(labels)
 
     label_masks = (labels > 0.5).T
 
@@ -321,7 +325,10 @@ for xs, labels in tqdm(dataloader_train):
     # break
 
 zs = np.concatenate(zs, axis=0)
+labels_onehot = np.concatenate(labels_onehot, axis=0)
 
+print(f"\tEncoding shape (zs): {zs.shape}")
+print(f"\tLabels shape (one-hot): {labels_onehot.shape}")
 
 sem_labels = sem_labels / label_count[:, None]
 
@@ -333,6 +340,28 @@ print(f"\tAverage per-label activity: {sem_labels.mean(axis=-1)}")
 print(f"\tSemantic labels shape: {sem_labels.shape}")
 
 print(f"\nAverage activity: {outs['z'].mean()}")
+
+"""---------------------"""
+""" Forward pass on validation set """
+"""---------------------"""
+
+print("\nForward pass on the whole validation set")
+
+zs_val = []
+labels_onehot_val = []
+
+for xs, labels in tqdm(dataloader_val):
+    # encode using a forward pass
+    outs, _ = forward_eval_jitted(variables, xs)
+
+    zs_val.append(outs["z"])
+    labels_onehot_val.append(labels)
+
+zs_val = np.concatenate(zs_val, axis=0)
+labels_onehot_val = np.concatenate(labels_onehot_val, axis=0)
+
+print(f"\tEncoding shape (zs_val): {zs_val.shape}")
+print(f"\tLabels shape (one-hot): {labels_onehot_val.shape}")
 
 """---------------------"""
 """ Statistics on unit activity """
@@ -382,6 +411,41 @@ print(f"\nUnused units:")
 print(f"\tUsed less than: {used_less_than}")
 print(f"\tUnused: {count_unused}")
 
+
+"""---------------------"""
+""" Linear Support Vector Classification """
+"""---------------------"""
+
+print("\nLinear Support Vector Classification")
+
+labels_categorical = labels_onehot.argmax(axis=-1)
+labels_categoriacl_val = labels_onehot_val.argmax(axis=-1)
+
+print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
+print(f"\tLabels val shape (categorical): {labels_categoriacl_val.shape}")
+
+
+svm_model = LinearSVC(
+    random_state=0,
+    tol=1e-5,
+    multi_class="ovr",
+    dual=False,  # use primal solver, we have n_sample > n_features
+)
+
+print("\nTraining Linear SVM on the training set")
+t0 = time()
+svm_model.fit(
+    zs,
+    labels_categorical,
+)
+print(f"\t  Training time: {time() - t0:.2f} seconds")
+
+print(f"\tAccuracy on training set: {svm_model.score(zs, labels_categorical)}")
+
+print(f"\tAccuracy on validation set: {svm_model.score(zs_val, labels_categoriacl_val)}")
+
+
+exit()
 
 """---------------------"""
 """ Inter-Label similarity """
