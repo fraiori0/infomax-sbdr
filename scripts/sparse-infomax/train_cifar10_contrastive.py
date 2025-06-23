@@ -452,8 +452,8 @@ def train_step(state, batch):
         outs_1, mutable_updates_1 = forward(
             {
                 "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
+                # BATCH_NORM - change here
+                "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_1"],
             batch["key_1"],
@@ -462,12 +462,27 @@ def train_step(state, batch):
         outs_2, mutable_updates_2 = forward(
             {
                 "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
+                # BATCH_NORM - change here
+                "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_2"],
             batch["key_2"],
         )
+        
+        # ADD NOISE - change here
+        key1_p, key1_n = jax.random.split(batch["key_1"])
+        key2_p, key2_n = jax.random.split(batch["key_2"])
+        noise_p = 0.005
+        noise_n = 0.02
+        mask_p_1 = jax.random.bernoulli(key1_p, p=1-noise_p, shape=outs_1["z"].shape).astype(outs_1["z"].dtype)
+        mask_p_2 = jax.random.bernoulli(key2_p, p=1-noise_p, shape=outs_2["z"].shape).astype(outs_2["z"].dtype)
+        mask_n_1 = jax.random.bernoulli(key1_n, p=1-noise_n, shape=outs_1["z"].shape).astype(outs_1["z"].dtype)
+        mask_n_2 = jax.random.bernoulli(key2_n, p=1-noise_n, shape=outs_2["z"].shape).astype(outs_2["z"].dtype)
+        # OR with the positive noise, AND with the negative noise
+        outs_1["z"] = (1-((1-outs_1["z"]) * mask_p_1)) * mask_n_1
+        outs_2["z"] = (1-((1-outs_2["z"]) * mask_p_2)) * mask_n_2
+        
+
         # Compute FLO loss
         flo_loss_val = flo_loss(outs_1, outs_2)
         loss_val = flo_loss_val
@@ -478,10 +493,6 @@ def train_step(state, batch):
         # alpha = model_config["training"]["loss"]["alpha"]
         # loss = alpha * rec_loss_val + (1 - alpha) * loss_val
 
-        # # Compute weight decay loss
-        # weight_loss_val = l2_weight_loss(params["params"])
-        # loss_val = loss_val + weight_loss_val
-
         # # Compute sparsity
         sparsity_val = (outs_1["z"].mean() + outs_2["z"].mean()) / 2
 
@@ -489,7 +500,6 @@ def train_step(state, batch):
             "loss/total": loss_val,
             "loss/flo": flo_loss_val,
             # "loss/rec": rec_loss_val,
-            # "loss/weights": weight_loss_val,
             "sparsity": sparsity_val,
         }
 
@@ -505,15 +515,16 @@ def train_step(state, batch):
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (loss_val, (metrics, others)), grads = grad_fn(state["variables"]["params"])
     # update weights
-    updates, opt_state = optimizer.update(grads, state["opt_state"])
+    updates, opt_state = optimizer.update(grads, state["opt_state"], state["variables"]["params"])
     state["variables"]["params"] = optax.apply_updates(
         state["variables"]["params"], updates
     )
+    # Update optimizer state
     state["opt_state"] = opt_state
 
-    # # BATCH_NORM - change here
-    # # update batch stats
-    # state["variables"]["batch_stats"] = others["mutable_updates"]["batch_stats"]
+    # BATCH_NORM - change here
+    # update batch stats
+    state["variables"]["batch_stats"] = others["mutable_updates"]["batch_stats"]
 
     # update step
     state["step"] += 1
@@ -528,8 +539,8 @@ def eval_step(state, batch):
         outs_1, mutable_updates_1 = forward_eval(
             {
                 "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
+                # BATCH_NORM - change here
+                "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_1"],
         )
@@ -537,8 +548,8 @@ def eval_step(state, batch):
         outs_2, mutable_updates_2 = forward_eval(
             {
                 "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
+                # BATCH_NORM - change here
+                "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_2"],
         )
