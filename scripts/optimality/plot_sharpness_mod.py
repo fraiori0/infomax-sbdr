@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 
 if __name__ == "__main__":
 
-    SAVE_NAME = "sharpness_f128_s10000_multi"
+    SAVE_NAME = "sharpness_f128_s14400_multi"
 
     data_folder = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),

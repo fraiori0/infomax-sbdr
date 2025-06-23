@@ -35,9 +35,9 @@ if __name__ == "__main__":
     N_FEATURES = 128
 
     # Number of samples drawn from the gamma distribution
-    N_GAMMA_SAMPLES = 100
+    N_GAMMA_SAMPLES = 120
     # Number of binary samples drawn from each gamma distribution
-    N_SINGLE_MASK_SAMPLES = 100
+    N_SINGLE_MASK_SAMPLES = 120
     # Expected number of non-zero units after Bernoulli-sampling from N_FEATURES gamma-distributed probabilities over
     GAMMA_AVERAGE_NON_ZERO = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     # Concentration of the gamma distribution
@@ -56,35 +56,38 @@ if __name__ == "__main__":
     )
 
     sim_fns = {
-        # "jaccard_1e-6": jit(partial(sbdr.jaccard_index, eps=1e-6)),
-        # "jaccard_1e-2": jit(partial(sbdr.jaccard_index, eps=1e-2)),
-        # "jaccard_1e0": jit(partial(sbdr.jaccard_index, eps=1e0)),
-        "jaccard_mod_1e0": {
+        "jaccard_1e-2_1e-2": {
+            "self": jit(partial(sbdr.jaccard_index, eps=1.0e-2)),
+            "cross": jit(partial(sbdr.jaccard_index, eps=1.0e-2)),
+        },
+        "jaccard_1e0_1e-6": {
+            "self": jit(partial(sbdr.jaccard_index, eps=1.0)),
+            "cross": jit(partial(sbdr.jaccard_index, eps=1.0e-6)),
+        },
+        "jaccard_1e0_1e0": {
+            "self": jit(partial(sbdr.jaccard_index, eps=1.0)),
+            "cross": jit(partial(sbdr.jaccard_index, eps=1.0e0)),
+        },
+        "jaccard_mod_1e0_1e-6": {
             "self": jit(partial(sbdr.jaccard_index_mod, eps=1.0)),
             "cross": jit(partial(sbdr.jaccard_index_mod, eps=1.0e-6)),
         },
-        "jaccard_mod_2e0": {
-            "self": jit(partial(sbdr.jaccard_index_mod, eps=2.0)),
-            "cross": jit(partial(sbdr.jaccard_index_mod, eps=1.0e-6)),
-        },
-        "jaccard_mod_1e-2": {
-            "self": jit(partial(sbdr.jaccard_index_mod, eps=1e-2)),
-            "cross": jit(partial(sbdr.jaccard_index_mod, eps=1.0e-6)),
-        },
-        "jaccard_mod_1e-1": {
-            "self": jit(partial(sbdr.jaccard_index_mod, eps=1e-1)),
-            "cross": jit(partial(sbdr.jaccard_index_mod, eps=1.0e-6)),
-        },
-        "jaccard_mod_1e0invert": {
-            "self": jit(partial(sbdr.jaccard_index_mod, eps=1.0e-2)),
-            "cross": jit(partial(sbdr.jaccard_index_mod, eps=1.0)),
-        },
-        "jaccard_mod_3e0invert": {
-            "self": jit(partial(sbdr.jaccard_index_mod, eps=1.0e-2)),
-            "cross": jit(partial(sbdr.jaccard_index_mod, eps=3.0)),
-        },
         # "and": jit(sbdr.expected_and),
-        # "asymmetric_1e-2": jit(partial(sbdr.asymmetric_jaccard_index, eps=1e-2)),
+        "asymmetric_1e-2_1e-2": {
+            "self": jit(partial(sbdr.asymmetric_jaccard_index, eps=1.0e-2)),
+            "cross": jit(partial(sbdr.asymmetric_jaccard_index, eps=1.0e-2)),
+        },
+        "asymmetric_1e0_1e-6": {
+            "self": jit(partial(sbdr.asymmetric_jaccard_index, eps=1.0)),
+            "cross": jit(partial(sbdr.asymmetric_jaccard_index, eps=1.0e-6)),
+        },
+        "asymmetric_1e0_1e0": {
+            "self": jit(partial(sbdr.asymmetric_jaccard_index, eps=1.0)),
+            "cross": jit(partial(sbdr.asymmetric_jaccard_index, eps=1.0)),
+        },
+        # "neg_crossentropy_1e-2": jit(
+        #     partial(sbdr.negative_bernoulli_crossentropy_stable, eps=1e-2)
+        # ),
         # "neg_crossentropy_1e-6": jit(
         #     partial(sbdr.negative_bernoulli_crossentropy_stable, eps=1e-6)
         # ),
