@@ -38,6 +38,7 @@ config_module_dict = {
     "VGGFLO": VGGFLO,
     "VGGFLOAutoEncoder": VGGFLOAutoEncoder,
     "VGGFLOKSoftMax": VGGFLOKSoftMax,
+    "VGGGlobalPoolFLO": VGGGlobalPoolFLO,
 }
 
 config_transform_dict = {

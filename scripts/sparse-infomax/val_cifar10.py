@@ -31,10 +31,10 @@ import matplotlib.pyplot as plt
 
 # np.set_printoptions(precision=4, suppress=True)
 
-default_model = "vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "3"
-default_checkpoint_subfolder = "manual_select"  # "checkpoints"
-default_step = 60  # 102
+default_model = "vgg_gap_sigmoid_jaccard"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"
+default_checkpoint_subfolder = "checkpoints"  # "checkpoints"
+default_step = 136  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -372,7 +372,7 @@ print(f"\tLow: {count_low}")
 print(f"\tMiddle: {count_middle}")
 print(f"\tHigh: {count_high}")
 
-# # # Unusued units
+# # # Unused units
 # Count the relative number of units that are never active above some threshold
 th_active = 0.5
 count_activated = (zs > th_active).sum(axis=(0))

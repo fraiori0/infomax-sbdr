@@ -223,7 +223,7 @@ class VGGTransposeLayer(nn.Module):
     def setup(self):
         # we don't use a separate upsampling layer, so the first
         # conv-transpose layer match the stride of the pooling layer
-        # this is not enough if the stride of the kernel is not 1
+        # NOTE, this does not work if the stride of the kernel is not 1
         self.t_conv1 = nn.ConvTranspose(
             features=self.kernel_features,
             kernel_size=self.kernel_sizes,
@@ -393,5 +393,61 @@ class VGGFLOKSoftMax(VGG):
         # flatten
         z = z.reshape((*z.shape[:-2], -1))
         # compute neg pmi
+        neg_pmi = self.neg_pmi_layer(z)
+        return {"z": z, "neg_pmi": neg_pmi}
+
+
+class VGGGlobalPool(nn.Module):
+    out_features: int
+    kernel_features: Sequence[int]
+    activation_fn: Callable = nn.relu
+    use_batchnorm: bool = False
+    use_dropout: float = False
+    dropout_rates: Sequence[float] = None
+    training: bool = True
+    out_activation_fn: Callable = nn.sigmoid
+
+    def setup(self):
+        conv_layers = []
+        for f, dropout_rate in zip(self.kernel_features, self.dropout_rates):
+            conv_layers.append(
+                VGGLayer(
+                    kernel_features=f,
+                    activation_fn=self.activation_fn,
+                    use_batchnorm=self.use_batchnorm,
+                    use_dropout=self.use_dropout,
+                    dropout_rate=dropout_rate,
+                    training=self.training,
+                ),
+            )
+
+        self.conv_layers = nn.Sequential(conv_layers)
+
+        self.dense_layers = nn.Sequential(
+            [   
+                nn.Dense(features=self.out_features),
+                self.activation_fn,
+                nn.Dense(features=self.out_features),
+                self.out_activation_fn,
+            ]
+        )
+
+    def __call__(self, x):
+        x = self.conv_layers(x)
+       # Perform Global Average Pooling
+        x = np.mean(x, axis=(-3, -2))
+        x = self.dense_layers(x)
+        return {"z": x}
+
+
+class VGGGlobalPoolFLO(VGGGlobalPool):
+
+    def setup(self):
+        super().setup()
+        self.neg_pmi_layer = nn.Dense(features=1)
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        z = outs["z"]
         neg_pmi = self.neg_pmi_layer(z)
         return {"z": z, "neg_pmi": neg_pmi}
