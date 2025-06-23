@@ -109,11 +109,11 @@ def jaccard_index(px1, px2, eps=1.0):
     return (expected_and(px1, px2) + eps) / (expected_or(px1, px2) + eps)
 
 
-def jaccard_index(px1, px2, eps=1.0):
+def jaccard_index_mod(px1, px2, eps=1.0):
     """
     p(px1 | px2) = E(AND(px1, px2)) / E(OR(px1, px2))
     """
-    return (expected_and(px1, px2) + eps) / (expected_or(px1, px2) + eps)
+    return (expected_and(px1, px2)) / (expected_or(px1, px2) + eps)
 
 
 def asymmetric_jaccard_index(px1, px2, eps=1.0e-2):
