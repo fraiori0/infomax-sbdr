@@ -52,9 +52,10 @@ type = "jaccard"
 eps = 1.0e-2
 
 [training.optimizer]
-type = "adam"
+type = "adamw"
 [training.optimizer.kwargs]
 learning_rate = 0.001
+weight_decay = 0.0001
 
 [validation]
 split = 0.16

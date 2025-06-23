@@ -32,10 +32,10 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-default_model = "vgg_gap_sigmoid_jaccard"  # "vgg_sbdr_5softmax/1"  #
-default_number = "2"
-default_checkpoint_subfolder = "checkpoints"  # "checkpoints"
-default_step = 148  # 102
+default_model = "vgg_sigmoid_jaccard"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1.0"
+default_checkpoint_subfolder = "manual_select" #  "checkpoints"  # "checkpoints"
+default_step = 126  # 102
 
 # base folder
 base_folder = os.path.join(
