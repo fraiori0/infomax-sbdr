@@ -53,7 +53,7 @@ eps = 1.0e-2
 type = "adamw"
 [training.optimizer.kwargs]
 learning_rate = 0.001
-weight_decay = 0.0
+weight_decay = 0.0001
 
 [validation]
 split = 0.16
