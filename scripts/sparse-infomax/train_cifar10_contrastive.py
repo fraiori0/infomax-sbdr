@@ -371,8 +371,10 @@ def flo_loss(
     u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
     u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
     # compute FLO estimator
-    flo_loss_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
-    flo_loss_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
+    # flo_loss_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
+    # flo_loss_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
+    flo_loss_1 = -sbdr.flo_original(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
+    flo_loss_2 = -sbdr.flo_original(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
     flo_loss = (flo_loss_1 + flo_loss_2) / 2
     flo_loss = flo_loss.mean()
 
@@ -469,18 +471,18 @@ def train_step(state, batch):
             batch["key_2"],
         )
         
-        # ADD NOISE - change here
-        key1_p, key1_n = jax.random.split(batch["key_1"])
-        key2_p, key2_n = jax.random.split(batch["key_2"])
-        noise_p = 0.005
-        noise_n = 0.02
-        mask_p_1 = jax.random.bernoulli(key1_p, p=1-noise_p, shape=outs_1["z"].shape).astype(outs_1["z"].dtype)
-        mask_p_2 = jax.random.bernoulli(key2_p, p=1-noise_p, shape=outs_2["z"].shape).astype(outs_2["z"].dtype)
-        mask_n_1 = jax.random.bernoulli(key1_n, p=1-noise_n, shape=outs_1["z"].shape).astype(outs_1["z"].dtype)
-        mask_n_2 = jax.random.bernoulli(key2_n, p=1-noise_n, shape=outs_2["z"].shape).astype(outs_2["z"].dtype)
-        # OR with the positive noise, AND with the negative noise
-        outs_1["z"] = (1-((1-outs_1["z"]) * mask_p_1)) * mask_n_1
-        outs_2["z"] = (1-((1-outs_2["z"]) * mask_p_2)) * mask_n_2
+        # # ADD NOISE - change here
+        # key1_p, key1_n = jax.random.split(batch["key_1"])
+        # key2_p, key2_n = jax.random.split(batch["key_2"])
+        # noise_p = 0.005
+        # noise_n = 0.02
+        # mask_p_1 = jax.random.bernoulli(key1_p, p=1-noise_p, shape=outs_1["z"].shape).astype(outs_1["z"].dtype)
+        # mask_p_2 = jax.random.bernoulli(key2_p, p=1-noise_p, shape=outs_2["z"].shape).astype(outs_2["z"].dtype)
+        # mask_n_1 = jax.random.bernoulli(key1_n, p=1-noise_n, shape=outs_1["z"].shape).astype(outs_1["z"].dtype)
+        # mask_n_2 = jax.random.bernoulli(key2_n, p=1-noise_n, shape=outs_2["z"].shape).astype(outs_2["z"].dtype)
+        # # OR with the positive noise, AND with the negative noise
+        # outs_1["z"] = (1-((1-outs_1["z"]) * mask_p_1)) * mask_n_1
+        # outs_2["z"] = (1-((1-outs_2["z"]) * mask_p_2)) * mask_n_2
         
 
         # Compute FLO loss

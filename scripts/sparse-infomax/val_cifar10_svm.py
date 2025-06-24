@@ -32,10 +32,10 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-default_model = "vgg_sigmoid_jaccard"  # "vgg_sbdr_5softmax/1"  #
-default_number = "1.0"
-default_checkpoint_subfolder = "manual_select" #  "checkpoints"  # "checkpoints"
-default_step = 126  # 102
+default_model = "vgg_sigmoid_asymjac"  # "vgg_sbdr_5softmax/1"  #
+default_number = "2"
+default_checkpoint_subfolder = "manual_select" # 
+default_step = 75  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -44,6 +44,9 @@ base_folder = os.path.join(
     os.pardir,
 )
 base_folder = os.path.normpath(base_folder)
+
+BINARIZE = True  # whether to binarize the outputs or not
+BINARIZE_THRESHOLD = 0.2  # threshold for binarization, only used if BINARIZE is True
 
 
 """---------------------"""
@@ -434,15 +437,27 @@ svm_model = LinearSVC(
 
 print("\nTraining Linear SVM on the training set")
 t0 = time()
-svm_model.fit(
-    zs,
-    labels_categorical,
-)
-print(f"\t  Training time: {time() - t0:.2f} seconds")
 
-print(f"\tAccuracy on training set: {svm_model.score(zs, labels_categorical)}")
+if BINARIZE:
+    svm_model.fit(
+        (zs>0.2).astype(zs),
+        labels_categorical,
+    )
+    acc_train = svm_model.score((zs>BINARIZE_THRESHOLD).astype(zs), labels_categorical)
+    acc_val = svm_model.score((zs_val>BINARIZE_THRESHOLD).astype(zs_val), labels_categoriacl_val)
+else:
+    svm_model.fit(
+        zs,
+        labels_categorical,
+    )
+    acc_train = svm_model.score(zs, labels_categorical)
+    acc_val = svm_model.score(zs_val, labels_categoriacl_val)
 
-print(f"\tAccuracy on validation set: {svm_model.score(zs_val, labels_categoriacl_val)}")
+print(f"\t  Time: {time() - t0:.2f} seconds")
+
+print(f"\tAccuracy on training set: {acc_train}")
+
+print(f"\tAccuracy on validation set: {acc_val}")
 
 
 exit()

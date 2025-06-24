@@ -50,4 +50,5 @@ config_similarity_dict = {
     "jaccard": bc.jaccard_index,
     "and": bc.expected_and,
     "cosine_normalized": bc.cosine_similarity_normalized,
+    "asym_jaccard": bc.asymmetric_jaccard_index,
 }
