@@ -1,4 +1,7 @@
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] =  3
+
 from functools import partial
 import argparse
 from time import time

@@ -43,6 +43,7 @@ args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] =  args.cuda_devices
 
+
 """---------------------"""
 """ Import libraries """
 """---------------------"""
@@ -77,6 +78,8 @@ np.set_printoptions(precision=4, suppress=True)
 
 # print available devices
 print(f"Available devices: {jax.devices()}")
+
+# torch.multiprocessing.set_start_method('spawn')
 
 """---------------------"""
 """ Import model config """
@@ -150,6 +153,7 @@ dataset = sbdr.Cifar10DatasetContrastive(
     folder_path=data_folder,
     kind="train",
     transform=transform,
+    device="cpu",#torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 )
 
 dataset_train, dataset_val = torch.utils.data.random_split(
@@ -167,6 +171,7 @@ dataloader_train = sbdr.NumpyLoader(
     batch_size=model_config["training"]["batch_size"],
     shuffle=model_config["training"]["dataloader"]["shuffle"],
     drop_last=model_config["training"]["dataloader"]["drop_last"],
+    # num_workers=1,
 )
 
 dataloader_val = sbdr.NumpyLoader(
@@ -174,9 +179,17 @@ dataloader_val = sbdr.NumpyLoader(
     batch_size=model_config["validation"]["dataloader"]["batch_size"],
     shuffle=False,
     drop_last=True,
+    # num_workers=2,
 )
 
+
 (xs_1, xs_2), labels = next(iter(dataloader_train))
+# print original device
+print(f"\tOriginal device: {xs_1.device}")
+print(f"\tOriginal device: {xs_2.device}")
+print()
+# xs_1 = jax.device_put(xs_1)
+# xs_2 = jax.device_put(xs_2)
 
 print(f"\tInput xs: {xs_1.shape} (dtype: {xs_1.dtype})")
 print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
@@ -213,7 +226,6 @@ dataloader_original = sbdr.NumpyLoader(
     shuffle=model_config["training"]["dataloader"]["shuffle"],
     drop_last=model_config["training"]["dataloader"]["drop_last"],
 )
-
 
 """---------------------"""
 """ Visualize the images"""
@@ -252,7 +264,7 @@ dataloader_original = sbdr.NumpyLoader(
 #         break
 # cv2.destroyAllWindows()
 
-# exit()
+
 """---------------------"""
 """ Init Network """
 """---------------------"""
@@ -282,6 +294,8 @@ model_eval = model_class(
 # # # Initialize parameters
 # Take some data
 (xs_1, xs_2), labels = next(iter(dataloader_train))
+# xs_1 = jax.device_put(xs_1)
+# xs_2 = jax.device_put(xs_2)
 # Generate key
 key = jax.random.key(model_config["model"]["seed"])
 # Init params and batch_stats
@@ -332,6 +346,8 @@ forward_eval_jitted = jit(forward_eval)
 
 # test the forward pass
 (xs_1, xs_2), labels = next(iter(dataloader_train))
+# xs_1 = jax.device_put(xs_1)
+# xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
 
 outs, mutable_updates = forward_jitted(variables, xs_1, key)
@@ -397,6 +413,8 @@ flo_loss_jitted = jit(flo_loss)
 
 # test loss function
 (xs_1, xs_2), labels = next(iter(dataloader_train))
+# xs_1 = jax.device_put(xs_1)
+# xs_2 = jax.device_put(xs_2)
 
 key = jax.random.key(model_config["model"]["seed"])
 key_1, key_2 = jax.random.split(key)
@@ -615,6 +633,8 @@ def eval_step(state, batch):
 print("\t Test one train step and one eval step")
 
 (xs_1, xs_2), labels = next(iter(dataloader_train))
+# xs_1 = jax.device_put(xs_1)
+# xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
 key_1, key_2 = jax.random.split(key)
 batch = {
@@ -693,9 +713,9 @@ try:
 
             key, key_1, key_2 = jax.random.split(key, 3)
             batch = {
-                "x_1": xs_1,
+                "x_1": xs_1, # jax.device_put(xs_1),
                 "key_1": key_1,
-                "x_2": xs_2,
+                "x_2": xs_2, # jax.device_put(xs_2),
                 "key_2": key_2,
             }
             state, metrics, grads = train_step(state, batch)

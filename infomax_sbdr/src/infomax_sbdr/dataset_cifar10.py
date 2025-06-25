@@ -14,6 +14,7 @@ class Cifar10Dataset(Dataset):
         folder_path: str,
         kind: str = "train",
         transform: Callable = None,
+        device = None,
     ) -> None:
 
         super().__init__()
@@ -71,6 +72,11 @@ class Cifar10Dataset(Dataset):
         # print(f"\tChannel Mean: {self.images.mean(dim=(0, 1, 2))}")
         # print(f"\tChannel Std: {self.images.std(dim=(0, 1, 2))}")
 
+        # Move to the specific device, if specified
+        if device is not None:
+            self.images = self.images.to(device)
+            self.labels = self.labels.to(device)
+
     def __len__(self):
         return len(self.labels)
 
@@ -82,6 +88,8 @@ class Cifar10Dataset(Dataset):
         if self.transform is not None:
             img = self.transform(img)
 
+        # print the device on which the image is
+
         return img, label
 
 
@@ -91,8 +99,9 @@ class Cifar10DatasetContrastive(Cifar10Dataset):
         folder_path: str,
         kind: str = "train",
         transform: Callable = None,
+        device = None,
     ) -> None:
-        super().__init__(folder_path, kind, transform)
+        super().__init__(folder_path, kind, transform, device)
 
     # we change only the __getitem__ method
     # to apply data augmentation twice to the same image (to get two different versions)
