@@ -32,10 +32,13 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-default_model = "vgg_sigmoid_asymjac"  # "vgg_sbdr_5softmax/1"  #
-default_number = "2"
+BINARIZE = False  # whether to binarize the outputs or not
+BINARIZE_THRESHOLD = 0.2  # threshold for binarization, only used if BINARIZE is True
+
+default_model = "vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "6"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 75  # 102
+default_step = 265  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -45,8 +48,7 @@ base_folder = os.path.join(
 )
 base_folder = os.path.normpath(base_folder)
 
-BINARIZE = True  # whether to binarize the outputs or not
-BINARIZE_THRESHOLD = 0.2  # threshold for binarization, only used if BINARIZE is True
+
 
 
 """---------------------"""

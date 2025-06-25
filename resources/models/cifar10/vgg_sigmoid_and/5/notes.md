@@ -1,2 +1,2 @@
 - log(sim()) critic i.e. "modified" flo
-- performs not so bad but also not so good
+- output does not become sparse

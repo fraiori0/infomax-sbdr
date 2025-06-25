@@ -1,0 +1,3 @@
+- log(sim()) critic i.e. "modified" flo
+- l1 norm regularization
+- good classification performances with linear SVM

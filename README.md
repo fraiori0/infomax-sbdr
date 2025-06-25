@@ -2,6 +2,23 @@
 
 TODO: test using cosine distance and normalization with 1e0 bias on the norm
 
+## To comment in meetings
+
+- AND similarity + L1 norm have much worse utilization of units, but probably better classification (because we directly train them to be linerarly separable). Test with noise?
+- SHould we test ith autoencoder? On ImageNet would be not sane to use an autoencoder, should the test be standardized and same for all dataset?
+
+## Training checklist
+
+- l1 norm
+- reconstruction loss
+- FLO function (with or without exponential)
+- weight decay value of adamw (0.00001)
+- similarity function
+
+## Validation checklist
+
+- binarization
+
 ## Plots
 
 Use error bars in all plots

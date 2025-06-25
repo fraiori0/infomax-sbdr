@@ -8,7 +8,7 @@ out_features = 256
 kernel_features = [32, 64, 128]
 use_batchnorm = true
 use_dropout = true
-dropout_rates = [0.2, 0.3, 0.4]
+dropout_rates = [0.2, 0.25, 0.3]
 # training = true
    
 [dataset]
@@ -30,7 +30,7 @@ saturation = 0.15
 hue = 0.15
 
 [training]
-epochs = 180
+epochs = 210
 batch_size = 128
 
 [training.checkpoint]
@@ -44,17 +44,16 @@ shuffle = true
 # see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
 drop_last = true
 
-[training.loss.kwargs]
-weight_decay = 0.0
 [training.loss.sim_fn]
 type = "jaccard"
 [training.loss.sim_fn.kwargs]
-eps = 1.0e0
+eps = 1.0e-2
 
 [training.optimizer]
-type = "adam"
+type = "adamw"
 [training.optimizer.kwargs]
 learning_rate = 0.001
+weight_decay = 0.00001
 
 [validation]
 split = 0.16
