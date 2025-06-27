@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from typing import Sequence
+from typing import Sequence, Callable
 
 class DinoCustom(nn.Module):
     """ Model with pretrained Dinov2 + dense head
@@ -19,8 +19,8 @@ class DinoCustom(nn.Module):
         input_low_height: int,
         input_top_width: int,
         input_top_height: int,
-        activation=nn.LeakyReLU(),
-        dropout_rate: float = 0.0,
+        activation:Callable = nn.LeakyReLU(),
+        dropout_rate: float = None,
     ):
 
         super().__init__()
@@ -52,10 +52,6 @@ class DinoCustom(nn.Module):
         # freeze the parameters of dinov2
         for param in self.dino.parameters():
             param.requires_grad = False
-
-        # print(self.dino)
-
-        # self.flatten = nn.Flatten()
 
         # initialize the dense layers
         self._initialize_dense_layer(dense_sizes, output_positions)

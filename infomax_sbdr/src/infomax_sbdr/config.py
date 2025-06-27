@@ -4,6 +4,7 @@ from infomax_sbdr.dense_modules import *
 from infomax_sbdr.conv_modules import *
 from infomax_sbdr.transforms import *
 import infomax_sbdr.binary_comparisons as bc
+from torch import nn as torch_nn
 
 """
 Convenience dictionaries to match strings in config files to functions and classes.
@@ -19,6 +20,15 @@ config_activation_dict = {
     "gelu": nn.gelu,
     "leaky_relu": nn.leaky_relu,
     "identity": lambda x: x,
+}
+
+config_torch_activation_dict = {
+    "relu": torch_nn.ReLU(),
+    "leaky_relu": torch_nn.LeakyReLU(),
+    "tanh": torch_nn.Tanh(),
+    "sigmoid": torch_nn.Sigmoid(),
+    "softmax": torch_nn.Softmax(dim=-1),
+    "elu": torch_nn.ELU(),
 }
 
 config_optimizer_dict = {

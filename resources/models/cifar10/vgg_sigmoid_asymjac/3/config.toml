@@ -30,7 +30,7 @@ saturation = 0.15
 hue = 0.15
 
 [training]
-epochs = 150
+epochs = 300
 batch_size = 128
 
 [training.checkpoint]
@@ -57,7 +57,7 @@ weight_decay = 0.000005
 
 [validation]
 split = 0.16
-eval_interval = 8
+eval_interval = 12
 [validation.dataloader]
 batch_size = 256
 [validation.sim_fn]

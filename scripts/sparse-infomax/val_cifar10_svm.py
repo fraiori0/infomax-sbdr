@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] =  3
+os.environ["CUDA_VISIBLE_DEVICES"] =  "3"
 
 from functools import partial
 import argparse
@@ -35,8 +35,8 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-BINARIZE = False  # whether to binarize the outputs or not
-BINARIZE_THRESHOLD = 0.2  # threshold for binarization, only used if BINARIZE is True
+BINARIZE = True  # whether to binarize the outputs or not
+BINARIZE_THRESHOLD = 0.5  # threshold for binarization, only used if BINARIZE is True
 
 default_model = "vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
 default_number = "6"
@@ -334,9 +334,11 @@ for xs, labels in tqdm(dataloader_train):
 
 zs = np.concatenate(zs, axis=0)
 labels_onehot = np.concatenate(labels_onehot, axis=0)
+labels_categorical = labels_onehot.argmax(axis=-1)
 
 print(f"\tEncoding shape (zs): {zs.shape}")
 print(f"\tLabels shape (one-hot): {labels_onehot.shape}")
+print(f"\tLabels shape (categorical): {labels_categorical.shape}")
 
 sem_labels = sem_labels / label_count[:, None]
 
@@ -368,8 +370,12 @@ for xs, labels in tqdm(dataloader_val):
 zs_val = np.concatenate(zs_val, axis=0)
 labels_onehot_val = np.concatenate(labels_onehot_val, axis=0)
 
+
+labels_categorical_val = labels_onehot_val.argmax(axis=-1)
+
 print(f"\tEncoding shape (zs_val): {zs_val.shape}")
 print(f"\tLabels shape (one-hot): {labels_onehot_val.shape}")
+print(f"\tLabels shape (categorical): {labels_categorical_val.shape}")
 
 """---------------------"""
 """ Statistics on unit activity """
@@ -411,14 +417,72 @@ print(f"\tHigh: {count_high}")
 
 # # # Unused units
 # Count the relative number of units that are never active above some threshold
-th_active = 0.5
+th_active = 0.1
 count_activated = (zs > th_active).sum(axis=(0))
 used_less_than = np.array((1.0, 2.0, 5.0, 10.0, 20.0))
 count_unused = (count_activated[None, :] < used_less_than[:, None]).sum(axis=-1)
-print(f"\nUnused units:")
+print(f"\nUnused units (threshold {th_active:.3f}):")
 print(f"\tUsed less than: {used_less_than}")
 print(f"\tUnused: {count_unused}")
 
+"""---------------------"""
+""" K-Nearest Neighbors Classification """
+"""---------------------"""
+
+print("\nK-Nearest Neighbors Classification")
+
+# # # Compute "distances" using the similarity metrics
+sim_fn = jit(partial(
+    sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
+    **model_config["validation"]["sim_fn"]["kwargs"],
+))
+
+# binarize the encodings
+if BINARIZE:
+    zs_bnr_val = (zs_val > BINARIZE_THRESHOLD).astype(zs_val)
+    zs_bnr = (zs > BINARIZE_THRESHOLD).astype(zs)
+    ds_val = -sim_fn(zs_bnr_val[:, None], zs_bnr[None, :])
+else:
+    ds_val = -sim_fn(zs_val[:, None], zs[None, :])
+
+print(f"\tDistances shape: {ds_val.shape}")
+
+# For each example in the validation set, find the k nearest neighbors in the training set
+k = 50
+# Use argpartition to find the index of the k nearest neighbors
+nearest_indices = np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
+print(f"\tNearest indices shape: {nearest_indices.shape}")
+# Select the labels of the k nearest neighbors
+nearest_labels = labels_onehot[nearest_indices]
+print(f"\tNearest labels shape: {nearest_labels.shape}")
+
+# Check how many of the k nearest neighbors have the same label as the validation example
+correct_mask = (labels_onehot_val[:, None] * nearest_labels).sum(axis=-1)  # shape: (n_val, k)
+print(f"\tCorrect mask shape: {correct_mask.shape}")
+
+# Compute the accuracy as the fraction of correct neighbors
+acc_knn = correct_mask.mean()
+
+correct_avg = correct_mask.mean(axis=-1)
+
+print(f"\tKNN accuracy: {acc_knn}")
+print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std()}")
+
+# Compute accuracy according to neighbor vote (with equal weights)
+average_label = (nearest_labels.mean(axis=-2))
+print(f"\tAverage label shape: {average_label.shape}")
+print(average_label[:5])
+# Convert to categorical labels
+labels_categorical_knn_val = average_label.argmax(axis=-1)
+# Compute accuracy
+acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
+
+print(f"\tKNN accuracy (vote)")
+print(f"\t\tK={k} : {acc_knn_vote:.4f}")
+
+
+
+exit()
 
 """---------------------"""
 """ Linear Support Vector Classification """
@@ -426,8 +490,7 @@ print(f"\tUnused: {count_unused}")
 
 print("\nLinear Support Vector Classification")
 
-labels_categorical = labels_onehot.argmax(axis=-1)
-labels_categoriacl_val = labels_onehot_val.argmax(axis=-1)
+
 
 print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
 print(f"\tLabels val shape (categorical): {labels_categoriacl_val.shape}")
@@ -456,7 +519,7 @@ else:
         labels_categorical,
     )
     acc_train = svm_model.score(zs, labels_categorical)
-    acc_val = svm_model.score(zs_val, labels_categoriacl_val)
+    acc_val = svm_model.score(zs_val, labels_categorical_val)
 
 print(f"\t  Time: {time() - t0:.2f} seconds")
 
@@ -465,7 +528,6 @@ print(f"\tAccuracy on training set: {acc_train}")
 print(f"\tAccuracy on validation set: {acc_val}")
 
 
-exit()
 
 """---------------------"""
 """ Inter-Label similarity """

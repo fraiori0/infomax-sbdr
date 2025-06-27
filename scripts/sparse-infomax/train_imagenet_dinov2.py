@@ -20,7 +20,7 @@ from torchvision import transforms as tv_transforms
 
 from tqdm import tqdm
 
-import datasets
+from datasets import load_dataset
 
 # base folder
 base_folder = os.path.join(
@@ -74,6 +74,14 @@ parser.add_argument(
     default=default_dinov2_folder,
 )
 
+parser.add_argument(
+    "-imn",
+    "--imagenet_folder",
+    type=str,
+    help="Folder where the ImageNet-1k dataset is stored",
+    default="~/research/imagenet-1k",
+)
+
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] =  args.cuda_devices
@@ -103,4 +111,21 @@ dino_pretrained_path = os.path.join(
 dino_hubconf_dir = os.path.join(
     args.dinov2_folder,
     "dinov2"
+)
+
+
+"""----------------------"""
+""" Load ImageNet-1k Dataset """
+"""----------------------"""
+
+# Load the ImageNet-1k dataset
+imagenet_train_dataset = load_dataset(
+    "imagenet-1k",
+    split="train",
+    cache_dir=args.imagenet_folder,
+)
+imagenet_val_dataset = load_dataset(
+    "imagenet-1k",
+    split="validation",
+    cache_dir=args.imagenet_folder,
 )
