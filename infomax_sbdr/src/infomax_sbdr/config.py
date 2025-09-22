@@ -21,6 +21,7 @@ config_activation_dict = {
     "gelu": nn.gelu,
     "leaky_relu": nn.leaky_relu,
     "identity": lambda x: x,
+    "mish": jax.nn.mish,
 }
 
 config_torch_activation_dict = {

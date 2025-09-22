@@ -1,0 +1,30 @@
+[model]
+type = "DenseClassifier"
+seed = 39
+activation = "leaky_relu"
+[model.kwargs]
+out_features = 10
+dense_features = [256]
+
+[training]
+epochs = 300
+batch_size = 32
+
+[training.checkpoint]
+save = true
+save_interval = 10 # epochs
+max_to_keep = 10
+
+[training.dataloader]
+shuffle = true
+# drop the last batch to avoid recompiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+
+[training.optimizer]
+type = "adamw"
+[training.optimizer.kwargs]
+learning_rate = 0.001
+weight_decay = 0.00001
+
+

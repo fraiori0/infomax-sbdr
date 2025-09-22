@@ -3,7 +3,7 @@ import jax.numpy as np
 from jax import jit
 
 
-def flo(uii, pii, pij, eps=1e-6):
+def flo(uii, pii, pij, eps=1e-6, mask_ij=None):
     """Estimate the Mutual Information between x_i and y_i using the FLO estimator
 
     Args:
@@ -20,17 +20,25 @@ def flo(uii, pii, pij, eps=1e-6):
     """
     # e_p = ((pij) / (pii + eps)).mean(axis=0)
 
-    # if pii is also contained in pij, we need to subtract 1
-    e_p = (1.0 / (pii.shape[-1] - 1.0)) * (
-        ((pij) / (pii + eps)[..., None]).sum(axis=-1) - 1.0
-    )
+    if mask_ij is None:
+        # if pii is also contained in pij, we need to subtract 1
+        e_p = (1.0 / (pii.shape[-1] - 1.0)) * (
+            ((pij) / (pii + eps)[..., None]).sum(axis=-1) - 1.0
+        )
+    else:
+        # divide by the sum of the mask 
+        # we don't remove 1 because we assume the mask is zero on the diagonal
+        # and pij is also zero on the diagonal
+        e_p = (1.0 / (mask_ij.sum(axis=-1))) * (
+            ((pij) / (pii + eps)[..., None]).sum(axis=-1)
+        )
 
     flo = 1 - (uii + np.exp(-uii) * e_p)
 
     return flo
 
 
-def flo_original(uii, gii, gij, eps=1e-6):
+def flo_original(uii, gii, gij, eps=1e-6, mask_ij=None):
     """Estimate the Mutual Information between x_i and y_i using the FLO estimator
 
     Args:
@@ -48,10 +56,17 @@ def flo_original(uii, gii, gij, eps=1e-6):
     # e_p = ((pij) / (pii + eps)).mean(axis=0)
 
     # if pii is also contained in pij, we need to subtract 1
-    e_p = (1.0 / (gii.shape[-1] - 1.0)) * (
-        np.exp(gij - gii[..., None]).sum(axis=-1) - 1.0
-    )
-
+    if mask_ij is None:
+        e_p = (1.0 / (gii.shape[-1] - 1.0)) * (
+            np.exp(gij - gii[..., None]).sum(axis=-1) - 1.0
+        )
+    else:
+        # divide by the sum of the mask 
+        # we don't remove 1 because we assume the mask is zero on the diagonal
+        # and pij is also zero on the diagonal
+        e_p = (1.0 / (mask_ij.sum(axis=-1))) * (
+            (mask_ij * np.exp(gij - gii[..., None])).sum(axis=-1)
+        )
     flo = 1 - (uii + np.exp(-uii) * e_p)
 
     return flo

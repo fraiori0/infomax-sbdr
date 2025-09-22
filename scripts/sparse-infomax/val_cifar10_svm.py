@@ -35,13 +35,13 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-BINARIZE = True  # whether to binarize the outputs or not
+BINARIZE = False  # whether to binarize the outputs or not
 BINARIZE_THRESHOLD = 0.5  # threshold for binarization, only used if BINARIZE is True
 
-default_model = "vgg_sigmoid_logand"  # "vgg_sbdr_5softmax/1"  #
-default_number = "4"
+default_model = "vgg_sigmoid_and" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 90  # 102
+default_step = 180  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -85,7 +85,7 @@ model_folder = os.path.join(
     base_folder,
     "resources",
     "models",
-    "cifar10",
+    "cifar10_sup",
     args.model,
     args.number,
 )
@@ -452,7 +452,7 @@ else:
 print(f"\tDistances shape: {ds_val.shape}")
 
 # For each example in the validation set, find the k nearest neighbors in the training set
-k = 50
+k = 19
 # Use argpartition to find the index of the k nearest neighbors
 nearest_indices = np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
 print(f"\tNearest indices shape: {nearest_indices.shape}")
