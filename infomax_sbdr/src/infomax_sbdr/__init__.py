@@ -7,5 +7,7 @@ from infomax_sbdr.dense_modules import *
 from infomax_sbdr.conv_modules import *
 from infomax_sbdr.dataset_fashionmnist import *
 from infomax_sbdr.dataset_cifar10 import *
+from infomax_sbdr.dataset_cifar100 import *
 from infomax_sbdr.torch2jaxdataloader import *
 from infomax_sbdr.predefined_modules import *
+from infomax_sbdr.dataset_classifier import *

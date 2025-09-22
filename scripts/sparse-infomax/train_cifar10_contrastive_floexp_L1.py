@@ -380,8 +380,8 @@ def flo_loss(
     # # Positive samples
     p_ii_ctx = sim_fn(outs_1["z"], outs_2["z"])
     # # Negative samples
-    p_ij_ctx_1 = sim_fn(outs_1["z"][..., :, None, :], outs_1["z"][..., None, :, :])
-    p_ij_ctx_2 = sim_fn(outs_2["z"][..., :, None, :], outs_2["z"][..., None, :, :])
+    p_ij_ctx_1 = sim_fn(outs_1["z"][..., :, None, :], outs_2["z"][..., None, :, :])
+    p_ij_ctx_2 = sim_fn(outs_2["z"][..., :, None, :], outs_1["z"][..., None, :, :])
     # # Neg-pmi term
     u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
     u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]

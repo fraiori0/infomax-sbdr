@@ -122,6 +122,11 @@ def asymmetric_jaccard_index(px1, px2, eps=1.0e-2):
     """
     return (expected_and(px1, px2) + eps) / (px2.sum(axis=-1) + eps)
 
+def log_and(px1, px2, eps=1.0):
+    # note, here we assume an implicit log operation is performed on the output of this is function,
+    # which cancels out with the exponentiation in the FLO estimator
+    return expected_and(px1, px2) + eps
+
 
 def active_crossentropy(px1, px2, eps=1.0e-6):
     return -(px1 * np.log(px2 + eps)).sum(axis=-1)

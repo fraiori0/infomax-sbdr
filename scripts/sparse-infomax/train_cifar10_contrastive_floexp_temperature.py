@@ -404,6 +404,7 @@ def flo_loss(
     temperature = model_config["training"]["loss"]["sim_fn"]["temperature"]
     p_ii_ctx = p_ii_ctx / temperature
     p_ij_ctx_1 = p_ij_ctx_1 / temperature
+    p_ij_ctx_2 = p_ij_ctx_2 / temperature
     # compute FLO estimator
     flo_loss_1 = -sbdr.flo_original(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
     flo_loss_2 = -sbdr.flo_original(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)

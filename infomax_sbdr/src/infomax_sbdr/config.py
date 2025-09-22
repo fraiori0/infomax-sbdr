@@ -5,6 +5,7 @@ from infomax_sbdr.conv_modules import *
 from infomax_sbdr.transforms import *
 import infomax_sbdr.binary_comparisons as bc
 from torch import nn as torch_nn
+import infomax_sbdr.classifier_modules as classifier_modules
 
 """
 Convenience dictionaries to match strings in config files to functions and classes.
@@ -49,6 +50,12 @@ config_module_dict = {
     "VGGFLOAutoEncoder": VGGFLOAutoEncoder,
     "VGGFLOKSoftMax": VGGFLOKSoftMax,
     "VGGGlobalPoolFLO": VGGGlobalPoolFLO,
+    "VGGFLOMultiLayerNEGPMI": VGGFLOMultiLayerNEGPMI,
+    "VGGDecoder": VGGDecoder,
+}
+
+config_classifier_module_dict = {
+    "DenseClassifier": classifier_modules.DenseClassifier,
 }
 
 config_transform_dict = {
@@ -61,4 +68,5 @@ config_similarity_dict = {
     "and": bc.expected_and,
     "cosine_normalized": bc.cosine_similarity_normalized,
     "asym_jaccard": bc.asymmetric_jaccard_index,
+    "log_and": bc.log_and,
 }

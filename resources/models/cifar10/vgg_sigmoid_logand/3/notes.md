@@ -1,0 +1,2 @@
+- low bias (1e-2) and temperature
+- log-canceled FLO (we use logand with the "modified" FLO, without the exp, so we don't even do the log)

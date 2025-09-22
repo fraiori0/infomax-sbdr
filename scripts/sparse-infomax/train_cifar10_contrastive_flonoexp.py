@@ -395,8 +395,8 @@ def flo_loss(
     # # Positive samples
     p_ii_ctx = sim_fn(outs_1["z"], outs_2["z"])
     # # Negative samples
-    p_ij_ctx_1 = sim_fn(outs_1["z"][..., :, None, :], outs_1["z"][..., None, :, :])
-    p_ij_ctx_2 = sim_fn(outs_2["z"][..., :, None, :], outs_2["z"][..., None, :, :])
+    p_ij_ctx_1 = sim_fn(outs_1["z"][..., :, None, :], outs_2["z"][..., None, :, :])
+    p_ij_ctx_2 = sim_fn(outs_2["z"][..., :, None, :], outs_1["z"][..., None, :, :])
     # # Neg-pmi term
     u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
     u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
@@ -677,7 +677,7 @@ def activation_to_img(z):
     pad_width = [(0, 0)] * (len(z.shape) - 1)
     pad_width.append((0, n_height * n_width - z.shape[-1]))
     z = np.pad(z, pad_width, mode="constant", constant_values=0.0)
-    # also a dummy final dimension, like it's grayscale
+    # add a dummy final channel dimension, like it's grayscale
     z = z.reshape((*z.shape[:-1], n_height, n_width, 1))
     return onp.array(z)
 

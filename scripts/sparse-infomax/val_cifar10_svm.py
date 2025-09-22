@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] =  "3"
+os.environ["CUDA_VISIBLE_DEVICES"] =  "2"
 
 from functools import partial
 import argparse
@@ -38,10 +38,10 @@ from sklearn.svm import LinearSVC
 BINARIZE = True  # whether to binarize the outputs or not
 BINARIZE_THRESHOLD = 0.5  # threshold for binarization, only used if BINARIZE is True
 
-default_model = "vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "6"
+default_model = "vgg_sigmoid_logand"  # "vgg_sbdr_5softmax/1"  #
+default_number = "4"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 265  # 102
+default_step = 90  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -417,13 +417,17 @@ print(f"\tHigh: {count_high}")
 
 # # # Unused units
 # Count the relative number of units that are never active above some threshold
-th_active = 0.1
-count_activated = (zs > th_active).sum(axis=(0))
-used_less_than = np.array((1.0, 2.0, 5.0, 10.0, 20.0))
-count_unused = (count_activated[None, :] < used_less_than[:, None]).sum(axis=-1)
-print(f"\nUnused units (threshold {th_active:.3f}):")
-print(f"\tUsed less than: {used_less_than}")
-print(f"\tUnused: {count_unused}")
+th_active = np.array((0.001, 0.01, 0.05, 0.1, 0.15))
+count_activated = (zs > th_active[:, None, None]).sum(axis=(-2))
+used_less_than = np.array((1.5, 2.5, 5.5, 10.5, 20.5))
+count_unused = (count_activated[:, None] < used_less_than[None, :, None]).sum(axis=-1)
+print(f"\nUnused units:")
+for i, th in enumerate(th_active):
+    print(f"\tThreshold {th:.3f}")
+    print(
+        f"\t  {count_unused[i]}"
+    )
+
 
 """---------------------"""
 """ K-Nearest Neighbors Classification """
@@ -481,9 +485,6 @@ print(f"\tKNN accuracy (vote)")
 print(f"\t\tK={k} : {acc_knn_vote:.4f}")
 
 
-
-exit()
-
 """---------------------"""
 """ Linear Support Vector Classification """
 """---------------------"""
@@ -493,7 +494,7 @@ print("\nLinear Support Vector Classification")
 
 
 print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
-print(f"\tLabels val shape (categorical): {labels_categoriacl_val.shape}")
+print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
 
 
 svm_model = LinearSVC(
@@ -512,7 +513,7 @@ if BINARIZE:
         labels_categorical,
     )
     acc_train = svm_model.score((zs>BINARIZE_THRESHOLD).astype(zs), labels_categorical)
-    acc_val = svm_model.score((zs_val>BINARIZE_THRESHOLD).astype(zs_val), labels_categoriacl_val)
+    acc_val = svm_model.score((zs_val>BINARIZE_THRESHOLD).astype(zs_val), labels_categorical_val)
 else:
     svm_model.fit(
         zs,
@@ -527,102 +528,3 @@ print(f"\tAccuracy on training set: {acc_train}")
 
 print(f"\tAccuracy on validation set: {acc_val}")
 
-
-
-"""---------------------"""
-""" Inter-Label similarity """
-"""---------------------"""
-
-sim_fn = partial(
-    sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
-    **model_config["validation"]["sim_fn"]["kwargs"],
-)
-
-
-# # # Similarity matrix between semantic labels (normalizing and using dot-product)
-sem_labels = sem_labels / np.linalg.norm(sem_labels, axis=-1, keepdims=True)
-label_sims = (sem_labels[:, None] * sem_labels[None, :]).sum(axis=-1)
-
-# # # Similarity matrix between semantic labels (setting 90th percentile to 1 and using jaccard index)
-# for each label, compute the 90th percentile of activity (in that label)
-# q = model_config["validation"]["sim_fn"]["quantile"]
-# sem_thresh = np.quantile(sem_labels, q, axis=-1)
-# sem_labels = (sem_labels > sem_thresh[:, None]).astype(np.float32)
-# # keep only the features shared with less then 2.5 labels
-# print(sem_labels.mean(axis=-1))
-# sem_labels = sem_labels * (sem_labels.sum(axis=0, keepdims=True) < 2.5)
-
-
-print(sem_labels.shape)
-print(sem_labels.mean(axis=-1))
-
-
-label_sims = sim_fn(sem_labels[:, None], sem_labels[None, :])
-
-print(f"\tSemantic label similarity: {label_sims}")
-print(label_sims.shape)
-
-# # plot on a heatmap
-# fig = go.Figure()
-# fig.add_trace(
-#     go.Heatmap(
-#         z=label_sims,
-#         # zmin=0.0,
-#         # zmax=1.0,
-#         colorscale="Viridis",
-#     )
-# )
-# fig.update_layout(
-#     title="Semantic Label Similarity",
-#     xaxis_title="Semantic Label",
-#     yaxis_title="Semantic Label",
-# )
-# fig.show()
-
-
-"""---------------------"""
-""" Classification """
-"""---------------------"""
-
-print("\nClassification of validation set")
-
-acc_top_1 = []
-acc_top_3 = []
-
-key = jax.random.key(model_config["model"]["seed"])
-for xs, labels in tqdm(dataloader_val):
-
-    # # add some gaussian noise
-    # key, _ = jax.random.split(key)
-    # noise = 0.2 * jax.random.normal(key, shape=xs.shape)
-    # xs = xs + noise
-
-    # encode using a forward pass
-    outs, _ = forward_eval_jitted(variables, xs)
-
-    # compute similarity to each semantic label
-    # label_sims = sim_fn(outs["z"][:, None], sem_labels[None, :])
-    label_sims = (outs["z"][:, None] * sem_labels[None, :]).sum(axis=-1)
-
-    # Top 1 accuracy
-    # find the most similar semantic label for each example
-    label_ids = label_sims.argmax(axis=-1)
-    # compute accuracy
-    acc_top_1.append((label_ids == labels.argmax(axis=-1)).mean())
-
-    # Top 3 accuracy
-    # find the top 3 most similar semantic labels for each example
-    label_ids = label_sims.argsort(axis=-1)[:, -3:]
-    # compute accuracy
-    acc_top_3.append(
-        ((label_ids == labels.argmax(axis=-1)[:, None]).sum(axis=-1)).mean()
-    )
-
-    # break
-
-# convert to jax numpy array
-acc_top_1 = np.array(acc_top_1)
-acc_top_3 = np.array(acc_top_3)
-
-print(f"\tTop 1 accuracy: {acc_top_1.mean()}")
-print(f"\tTop 3 accuracy: {acc_top_3.mean()}")

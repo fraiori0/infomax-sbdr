@@ -5,6 +5,7 @@ import flax.linen as nn
 from typing import Sequence, Callable, Tuple
 from functools import partial
 import infomax_sbdr.binary_comparisons as bc
+from math import prod
 
 
 """ Custom Pool functions"""
@@ -214,11 +215,13 @@ class VGGTransposeLayer(nn.Module):
     # pool_sizes = None
     # pool_strides: Tuple[int, int] = (2, 2)
     # pool_padding = None
-    activation_fn: Callable = nn.relu
+    activation_fn: Callable = nn.leaky_relu
+    second_activation: bool = True
     use_batchnorm: bool = False
+    use_dropout: bool = False
+    dropout_rate: float = None
     training: bool = True
-    use_dropout = False
-    dropout_rate = None
+    
 
     def setup(self):
         # we don't use a separate upsampling layer, so the first
@@ -241,15 +244,25 @@ class VGGTransposeLayer(nn.Module):
             self.bn1 = nn.BatchNorm(use_running_average=not self.training)
             self.bn2 = nn.BatchNorm(use_running_average=not self.training)
 
+        if self.use_dropout:
+            self.dropout = nn.Dropout(
+                rate=self.dropout_rate,
+                deterministic=not self.training,
+            )
+
     def __call__(self, x):
+        # here we do dropout before the layers
+        if self.use_dropout:
+            x = self.dropout(x)
         x = self.t_conv1(x)
         if self.use_batchnorm:
             x = self.bn1(x)
         x = self.activation_fn(x)
         x = self.t_conv2(x)
-        if self.use_batchnorm:
-            x = self.bn2(x)
-        x = self.activation_fn(x)
+        if self.second_activation:
+            if self.use_batchnorm:
+                x = self.bn2(x)
+            x = self.activation_fn(x)
         return x
 
 
@@ -288,9 +301,65 @@ class VGG(nn.Module):
 
     def __call__(self, x):
         x = self.conv_layers(x)
+        conv_shape = x.shape[-3:]
         # flatten the last three dimensions (i.e., C, H, W)
         x = x.reshape((*x.shape[:-3], -1))
         x = self.dense_layers(x)
+        return {"z": x, "conv_shape": conv_shape}
+
+class VGGDecoder(nn.Module):
+    """Decoder architecture that can be used after a VGG architecture."""
+    deconv_kernel_features: Sequence[int] = None
+    preconv_chw: Sequence[int] = None
+    activation_fn: Callable = nn.leaky_relu
+    use_batchnorm: bool = False
+    use_dropout: float = False
+    dropout_rates: Sequence[float] = None
+    training: bool = True
+
+    def setup(self):
+        in_features = prod(self.preconv_chw)
+
+        self.decoder_dense = nn.Sequential(
+            [
+                nn.Dense(features=in_features),
+                self.activation_fn,
+            ]
+        )
+
+        conv_transpose_layers = []
+        # the last layer has no activation function on the output
+        for i in range(len(self.deconv_kernel_features)-1):
+            conv_transpose_layers.append(
+                VGGTransposeLayer(
+                    kernel_features=self.deconv_kernel_features[i],
+                    activation_fn=self.activation_fn,
+                    use_batchnorm=self.use_batchnorm,
+                    training=self.training,
+                    second_activation=True,
+                    use_dropout=self.use_dropout,
+                    dropout_rate=self.dropout_rates[i],
+                ),
+            )
+        conv_transpose_layers.append(
+            VGGTransposeLayer(
+                kernel_features=self.deconv_kernel_features[-1],
+                activation_fn=self.activation_fn,
+                use_batchnorm=self.use_batchnorm,
+                training=self.training,
+                second_activation=False,
+                use_dropout=self.use_dropout,
+                dropout_rate=self.dropout_rates[-1],
+            ),
+        )
+
+        self.conv_transpose_layers = nn.Sequential(conv_transpose_layers)
+
+    def __call__(self, x):
+        x = self.decoder_dense(x)
+        # reshape back to (*batch_dims, C, H, W)
+        x = x.reshape((*x.shape[:-1], *self.preconv_chw))
+        x = self.conv_transpose_layers(x)
         return {"z": x}
 
 
@@ -353,9 +422,29 @@ class VGGFLO(VGG):
 
     def __call__(self, x):
         outs = super().__call__(x)
-        z = outs["z"]
-        neg_pmi = self.neg_pmi_layer(z)
-        return {"z": z, "neg_pmi": neg_pmi}
+        neg_pmi = self.neg_pmi_layer(outs["z"])
+        outs["neg_pmi"] = neg_pmi
+        return outs
+    
+class VGGFLOMultiLayerNEGPMI(VGG):
+
+    neg_pmi_hid_features: Sequence[int] = None
+
+    def setup(self):
+        super().setup()
+        neg_pmi_layers = []
+        for f in self.neg_pmi_hid_features:
+            neg_pmi_layers.append(nn.Dense(features=f))
+            neg_pmi_layers.append(self.activation_fn)
+        neg_pmi_layers.append(nn.Dense(features=1))
+        self.neg_pmi_layers = nn.Sequential(neg_pmi_layers)
+        
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        neg_pmi = self.neg_pmi_layers(outs["z"])
+        outs["neg_pmi"] = neg_pmi
+        return outs
 
 
 class VGGFLOAutoEncoder(VGGAutoEncoder):
@@ -366,10 +455,8 @@ class VGGFLOAutoEncoder(VGGAutoEncoder):
 
     def __call__(self, x):
         outs = super().__call__(x)
-        z = outs["z"]
-        x_rec = outs["x_rec"]
-        neg_pmi = self.neg_pmi_layer(z)
-        return {"z": z, "neg_pmi": neg_pmi, "x_rec": x_rec}
+        outs["neg_pmi"] = self.neg_pmi_layer(outs["z"])
+        return outs
 
 
 class VGGFLOKSoftMax(VGG):
@@ -434,10 +521,11 @@ class VGGGlobalPool(nn.Module):
 
     def __call__(self, x):
         x = self.conv_layers(x)
+        conv_shape = x.shape[-3:]
        # Perform Global Average Pooling
         x = np.mean(x, axis=(-3, -2))
         x = self.dense_layers(x)
-        return {"z": x}
+        return {"z": x, "conv_shape": conv_shape}
 
 
 class VGGGlobalPoolFLO(VGGGlobalPool):
@@ -448,6 +536,5 @@ class VGGGlobalPoolFLO(VGGGlobalPool):
 
     def __call__(self, x):
         outs = super().__call__(x)
-        z = outs["z"]
-        neg_pmi = self.neg_pmi_layer(z)
-        return {"z": z, "neg_pmi": neg_pmi}
+        outs["neg_pmi"] = self.neg_pmi_layer(outs["z"])
+        return outs
