@@ -36,12 +36,13 @@ from sklearn.svm import LinearSVC
 # np.set_printoptions(precision=4, suppress=True)
 
 BINARIZE = False  # whether to binarize the outputs or not
-BINARIZE_THRESHOLD = 0.5  # threshold for binarization, only used if BINARIZE is True
+BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is True
+BINARIZE_K = 7 # maximum number of non-zero elements to keep, if BINARIZE is True
 
-default_model = "vgg_sigmoid_and" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "1"
+default_model = "vgg_sigmoid_logand" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "3"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 180  # 102
+default_step = 290  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -85,7 +86,7 @@ model_folder = os.path.join(
     base_folder,
     "resources",
     "models",
-    "cifar10_sup",
+    "cifar10",
     args.model,
     args.number,
 )
@@ -428,6 +429,26 @@ for i, th in enumerate(th_active):
         f"\t  {count_unused[i]}"
     )
 
+"""---------------------"""
+""" Binarize/Sparsify encodings """
+"""---------------------"""
+
+if BINARIZE:
+    print("\nBinarizing/Sparsifying the encodings")
+    print(f"\tBinarization threshold: {BINARIZE_THRESHOLD}")
+    print(f"\tMaximum number of non-zero elements: {BINARIZE_K}")
+
+    def binarize_k(x, k):
+        # keep only the k-top largest values
+        idx_top_k = jax.lax.top_k(x, k)[1]
+        # set the rest to zero, keep the original value only for the k-top largest values
+        x_binarized = np.zeros_like(x).at[idx_top_k].set(x[idx_top_k])
+        return x_binarized
+    
+    binarize_k_jitted = jit(vmap(partial(binarize_k, k=BINARIZE_K)))
+    zs = binarize_k_jitted(zs)
+    zs_val = binarize_k_jitted(zs_val)
+
 
 """---------------------"""
 """ K-Nearest Neighbors Classification """
@@ -441,20 +462,15 @@ sim_fn = jit(partial(
     **model_config["validation"]["sim_fn"]["kwargs"],
 ))
 
-# binarize the encodings
-if BINARIZE:
-    zs_bnr_val = (zs_val > BINARIZE_THRESHOLD).astype(zs_val)
-    zs_bnr = (zs > BINARIZE_THRESHOLD).astype(zs)
-    ds_val = -sim_fn(zs_bnr_val[:, None], zs_bnr[None, :])
-else:
-    ds_val = -sim_fn(zs_val[:, None], zs[None, :])
+ds_val = -sim_fn(zs_val[:, None], zs[None, :])
 
 print(f"\tDistances shape: {ds_val.shape}")
 
 # For each example in the validation set, find the k nearest neighbors in the training set
 k = 19
-# Use argpartition to find the index of the k nearest neighbors
-nearest_indices = np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
+# Use jax.lax.top_k to find the index of the k nearest neighbors
+nearest_indices = jax.lax.top_k(-ds_val, k=k)[1]
+# np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
 print(f"\tNearest indices shape: {nearest_indices.shape}")
 # Select the labels of the k nearest neighbors
 nearest_labels = labels_onehot[nearest_indices]
@@ -475,7 +491,7 @@ print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std
 # Compute accuracy according to neighbor vote (with equal weights)
 average_label = (nearest_labels.mean(axis=-2))
 print(f"\tAverage label shape: {average_label.shape}")
-print(average_label[:5])
+# print(average_label[:5])
 # Convert to categorical labels
 labels_categorical_knn_val = average_label.argmax(axis=-1)
 # Compute accuracy
@@ -502,25 +518,18 @@ svm_model = LinearSVC(
     tol=1e-5,
     multi_class="ovr",
     dual=False,  # use primal solver, we have n_sample > n_features
+    intercept_scaling=10,
 )
 
 print("\nTraining Linear SVM on the training set")
 t0 = time()
 
-if BINARIZE:
-    svm_model.fit(
-        (zs>0.2).astype(zs),
-        labels_categorical,
-    )
-    acc_train = svm_model.score((zs>BINARIZE_THRESHOLD).astype(zs), labels_categorical)
-    acc_val = svm_model.score((zs_val>BINARIZE_THRESHOLD).astype(zs_val), labels_categorical_val)
-else:
-    svm_model.fit(
-        zs,
-        labels_categorical,
-    )
-    acc_train = svm_model.score(zs, labels_categorical)
-    acc_val = svm_model.score(zs_val, labels_categorical_val)
+svm_model.fit(
+    zs,
+    labels_categorical,
+)
+acc_train = svm_model.score(zs, labels_categorical)
+acc_val = svm_model.score(zs_val, labels_categorical_val)
 
 print(f"\t  Time: {time() - t0:.2f} seconds")
 

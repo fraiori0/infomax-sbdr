@@ -35,13 +35,14 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-BINARIZE = False  # whether to binarize the outputs or not
-BINARIZE_THRESHOLD = 0.5  # threshold for binarization, only used if BINARIZE is True
+BINARIZE = True  # whether to binarize the outputs or not
+BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is True
+BINARIZE_K = 7 # maximum number of non-zero elements to keep, if BINARIZE is True
 
-default_model = "vgg_sigmoid_logand"
-default_number = "2"
+default_model = "vgg_sigmoid_and" # "vgg_sigmoid_logand" #
+default_number = "6" # "2" #
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 295
+default_step = 265 # 295 #
 
 # base folder
 base_folder = os.path.join(
@@ -50,8 +51,6 @@ base_folder = os.path.join(
     os.pardir,
 )
 base_folder = os.path.normpath(base_folder)
-
-
 
 
 """---------------------"""
@@ -301,11 +300,6 @@ print(f"\t  one-hot: {coarse_labels_train.shape}")
 print(f"\t  categorical: {coarse_labels_train_cat.shape}")
 
 
-# Binarize the encodings, if needed
-if BINARIZE:
-    zs_train = (zs_train > BINARIZE_THRESHOLD).astype(zs_train.type)
-
-
 """---------------------"""
 """ Forward pass on validation set """
 """---------------------"""
@@ -339,10 +333,6 @@ print(f"\t  one-hot: {coarse_label_val.shape}")
 print(f"\t  categorical: {coarse_label_val_cat.shape}")
 
 
-# Binarize the encodings, if needed
-if BINARIZE:
-    zs_val = (zs_val > BINARIZE_THRESHOLD).astype(zs_val.type)
-
 """---------------------"""
 """ Statistics on unit activity """
 """---------------------"""
@@ -365,6 +355,27 @@ print(f"\t    per sample: {per_sample_qs_train}")
 print(f"\t  Val")
 print(f"\t    per unit: {per_unit_qs_val}")
 print(f"\t    per sample: {per_sample_qs_val}")
+
+
+"""---------------------"""
+""" Binarize/Sparsify encodings """
+"""---------------------"""
+
+if BINARIZE:
+    print("\nBinarizing/Sparsifying the encodings")
+    print(f"\tBinarization threshold: {BINARIZE_THRESHOLD}")
+    print(f"\tMaximum number of non-zero elements: {BINARIZE_K}")
+
+    def binarize_k(x, k):
+        # keep only the k-top largest values
+        idx_top_k = jax.lax.top_k(x, k)[1]
+        # set the rest to zero, keep the original value only for the k-top largest values
+        x_binarized = np.zeros_like(x).at[idx_top_k].set(x[idx_top_k])
+        return x_binarized
+    
+    binarize_k_jitted = jit(vmap(partial(binarize_k, k=BINARIZE_K)))
+    zs_train = binarize_k_jitted(zs_train)
+    zs_val = binarize_k_jitted(zs_val)
 
 
 """---------------------"""
