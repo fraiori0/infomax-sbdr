@@ -522,8 +522,9 @@ class VGGGlobalPool(nn.Module):
     def __call__(self, x):
         x = self.conv_layers(x)
         conv_shape = x.shape[-3:]
-       # Perform Global Average Pooling
-        x = np.mean(x, axis=(-3, -2))
+       # Perform Global Pooling
+        # x = np.mean(x, axis=(-3, -2))
+        x = np.max(x, axis=(-3, -2))
         x = self.dense_layers(x)
         return {"z": x, "conv_shape": conv_shape}
 
@@ -537,4 +538,24 @@ class VGGGlobalPoolFLO(VGGGlobalPool):
     def __call__(self, x):
         outs = super().__call__(x)
         outs["neg_pmi"] = self.neg_pmi_layer(outs["z"])
+        return outs
+
+class VGGGlobalPoolFLOMultiLayerNEGPMI(VGGGlobalPool):
+
+    neg_pmi_hid_features: Sequence[int] = None
+
+    def setup(self):
+        super().setup()
+        neg_pmi_layers = []
+        for f in self.neg_pmi_hid_features:
+            neg_pmi_layers.append(nn.Dense(features=f))
+            neg_pmi_layers.append(self.activation_fn)
+        neg_pmi_layers.append(nn.Dense(features=1))
+        self.neg_pmi_layers = nn.Sequential(neg_pmi_layers)
+        
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        neg_pmi = self.neg_pmi_layers(outs["z"])
+        outs["neg_pmi"] = neg_pmi
         return outs
