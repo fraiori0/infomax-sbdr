@@ -28,18 +28,18 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    N_SEEDS = 3
+    N_SEEDS = 10
     SEEDS = 50 * np.arange(N_SEEDS)
 
     # Number of features (i.e., dimension of a single sample)
-    N_FEATURES = 512
+    N_FEATURES = 256
 
     # Number of samples drawn from the gamma distribution
-    N_GAMMA_SAMPLES = 10
+    N_GAMMA_SAMPLES = 100
     # Number of binary samples drawn from each gamma distribution
-    N_SINGLE_MASK_SAMPLES = 10
+    N_SINGLE_MASK_SAMPLES = 100
     # Expected number of non-zero units after Bernoulli-sampling from N_FEATURES gamma-distributed probabilities over
-    GAMMA_AVERAGE_NON_ZERO = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    GAMMA_AVERAGE_NON_ZERO = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0]
     # Concentration of the gamma distribution
     GAMMA_CONCENTRATION = 100.0
     # Range for the uniform sampling of the activation level, after selecting the non-zero units
@@ -50,20 +50,15 @@ if __name__ == "__main__":
         (0.75, 1.0),
         (0.9, 1.0),
     ]
+    EPS_SIM = 1e-4
 
     SAVE_NAME = (
-        f"sharpness_f{N_FEATURES}_s{N_GAMMA_SAMPLES*N_SINGLE_MASK_SAMPLES}_multi"
+        f"sharpness_f{N_FEATURES}_s{N_GAMMA_SAMPLES*N_SINGLE_MASK_SAMPLES}"
     )
 
     sim_fns = {
-        "jaccard_1e-6": jit(partial(sbdr.jaccard_index, eps=1e-6)),
-        "jaccard_1e-2": jit(partial(sbdr.jaccard_index, eps=1e-2)),
-        "jaccard_1e0": jit(partial(sbdr.jaccard_index, eps=1e0)),
-        "and": jit(sbdr.expected_and),
-        "asymmetric_1e-2": jit(partial(sbdr.asymmetric_jaccard_index, eps=1e-2)),
-        "neg_crossentropy_1e-6": jit(
-            partial(sbdr.negative_bernoulli_crossentropy_stable, eps=1e-6)
-        ),
+        "exp_log_and": jit(sbdr.exp_log_and),
+        "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
     }
 
     MIs = {sim_name: [] for sim_name in sim_fns.keys()}
@@ -139,18 +134,13 @@ if __name__ == "__main__":
 
                 for sim_name, sim_fn in sim_fns.items():
                     # self-similarity
-                    p_ii = sim_fn(zs, zs)
+                    p_ii = sim_fn(zs, zs, eps=EPS_SIM)
                     # cross-similarity
-                    p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...])
+                    p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...], eps=EPS_SIM)
 
                     # check for nans in p_ij
                     # if np.any(np.isnan(p_ij)):
                     #     raise ValueError("p_ij has nan")
-
-                    if ("and" in sim_name) or ("crossentropy" in sim_name):
-                        # apply exponential if needed (depends on what we consider the critic to be)
-                        p_ii = np.exp(p_ii)
-                        p_ij = np.exp(p_ij)
 
                     # Compute InfoNCE k-sample estimator
                     pmis = np.log(p_ii / (p_ij.mean(axis=-1) + 1e-6) + 1e-6)
@@ -172,6 +162,7 @@ if __name__ == "__main__":
         "gamma_concentration": GAMMA_CONCENTRATION,
         "uniform_range": UNIFORM_RANGE,
         "seeds": SEEDS.tolist(),
+        "eps_sim": EPS_SIM,
     }
 
     if SAVE:

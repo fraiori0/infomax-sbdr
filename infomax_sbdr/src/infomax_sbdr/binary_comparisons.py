@@ -127,6 +127,23 @@ def log_and(px1, px2, eps=1.0):
     # which cancels out with the exponentiation in the FLO estimator
     return expected_and(px1, px2) + eps
 
+def exp_log_and(px1, px2, eps=1.0):
+    # note, here we assume an implicit log operation is performed on the output of this is function,
+    # which cancels out with the exponentiation in the FLO estimator
+    return (px1 * px2 + eps).sum(axis=-1)
+
+def exp_log_and_delta(px1, px2, eps=1.0e-5):
+    # delta approximation to E[ log(sum-AND(px1, px2) + eps) ]
+    # epsilon is important to stabilize the result when the expected AND is close to zero.
+    
+    # Compute average and variance, using an offset/bias of eps on the elementwise product of each component
+    mu_and = (px1 * px2 + eps).sum(axis=-1)
+    var_and = ((px1 * px2 + eps) * (1 - px1 * px2 - eps)).sum(axis=-1)
+
+    # Use second-order Taylor expansion to approximate E[log(X)] where X ~ N(mu_and, var_and)
+    # E_log_x = np.log(mu_and) - 0.5 * var_and / (mu_and ** 2)
+    # Compute a stable version of the exponential of the log-and
+    return (mu_and) * np.exp(-0.5 * var_and / (mu_and ** 2))
 
 def active_crossentropy(px1, px2, eps=1.0e-6):
     return -(px1 * np.log(px2 + eps)).sum(axis=-1)

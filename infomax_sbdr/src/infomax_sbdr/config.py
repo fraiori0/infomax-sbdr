@@ -44,7 +44,7 @@ config_optimizer_dict = {
 }
 
 config_module_dict = {
-    "DenseFLOSigmoid": DenseFLOSigmoid,
+    "DenseFLO": DenseFLO,
     "ConvFLONoPoolNoLast": ConvFLONoPoolNoLast,
     "ConvFLONoPool": ConvFLONoPool,
     "VGGFLO": VGGFLO,
@@ -53,6 +53,7 @@ config_module_dict = {
     "VGGGlobalPoolFLO": VGGGlobalPoolFLO,
     "VGGFLOMultiLayerNEGPMI": VGGFLOMultiLayerNEGPMI,
     "VGGDecoder": VGGDecoder,
+    "VGGGlobalPoolFLOMultiLayerNEGPMI": VGGGlobalPoolFLOMultiLayerNEGPMI,
 }
 
 config_classifier_module_dict = {

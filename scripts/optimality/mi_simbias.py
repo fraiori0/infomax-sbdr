@@ -28,7 +28,7 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    N_SEEDS = 7
+    N_SEEDS = 10
     SEEDS = 47 * np.arange(N_SEEDS)
 
     # Number of features (i.e., dimension of a single sample)
@@ -39,28 +39,26 @@ if __name__ == "__main__":
     # Number of binary samples drawn from each gamma distribution
     N_SINGLE_MASK_SAMPLES = 100
     # Expected number of non-zero units after Bernoulli-sampling from N_FEATURES gamma-distributed probabilities over
-    GAMMA_AVERAGE_NON_ZERO = [2.0, 4.0, 6.0, 8.0, 12.0]
+    GAMMA_AVERAGE_NON_ZERO = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0]
     # Concentration of the gamma distribution
     GAMMA_CONCENTRATION = 100.0
     # Range for the uniform sampling of the activation level, after selecting the non-zero units
     UNIFORM_RANGE = (0.9, 1.0)
 
     # Biases for the similarity function
-    EPS_CROSS = [1e-2, 1e-1, 1.0, 2.0, 4.0]
-    EPS_SELF = [1e-2, 1e-1, 1.0, 2.0, 4.0]
+    EPS_SIM = [1e-5, 1e-4, 1e-3, 2*1e-3, 3*1e-3, 5*1e-3, 1e-2]
 
 
-    def logand_sim(x,y, eps):
-        return np.log(sbdr.expected_and(x,y) + eps)
+    # def logand_sim(x,y, eps):
+    #     return np.log(sbdr.expected_and(x,y) + eps)
 
     SAVE_NAME = (
         f"simbias_f{N_FEATURES}_s{N_GAMMA_SAMPLES*N_SINGLE_MASK_SAMPLES}"
     )
 
     sim_fns = {
-        # use the and and then apply a log after summing the biases in all possible way
-        # (unless we go out of memory)
-        "logand": jit(sbdr.expected_and),
+        "exp_log_and": jit(sbdr.exp_log_and),
+        "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
     }
 
     MIs = {sim_name: [] for sim_name in sim_fns.keys()}
@@ -76,15 +74,15 @@ if __name__ == "__main__":
         if verbose:
             print(f"\nn_nonzero: {n_nonzero}")
 
-        for i, eps_cross in enumerate(
-            tqdm(EPS_CROSS, leave=False, disable=disable_tqdm)
+        for i, eps_sim in enumerate(
+            tqdm(EPS_SIM, leave=False, disable=disable_tqdm)
         ):
 
             for k in MIs.keys():
                 MIs[k][-1].append([])
 
             if verbose:
-                print(f"  eps_cross: {eps_cross}")
+                print(f"  eps_sim: {eps_sim}")
 
             for seed in tqdm(SEEDS, leave=False, disable=disable_tqdm):
 
@@ -137,18 +135,17 @@ if __name__ == "__main__":
                 for sim_name, sim_fn in sim_fns.items():
                     # self-similarity
                     # noe, we do all eps_self in parallel, if memory holds up
-                    p_ii = sim_fn(zs, zs) + np.array(EPS_SELF)[:, None]
+                    p_ii = sim_fn(zs, zs, eps=eps_sim)
                     # cross-similarity
-                    p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...]) + eps_cross
+                    p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...], eps=eps_sim)
 
                     # check for nans in p_ij
                     # if np.any(np.isnan(p_ij)):
                     #     raise ValueError("p_ij has nan")
 
-                    if ("and" in sim_name) or ("crossentropy" in sim_name):
-                        # apply exponential if needed (depends on what we consider the critic to be)
-                        p_ii = np.exp(p_ii)
-                        p_ij = np.exp(p_ij)
+                    # # apply exponential if needed (depends on what we consider the critic to be)
+                    # p_ii = np.exp(p_ii)
+                    # p_ij = np.exp(p_ij)
 
                     # Compute InfoNCE k-sample estimator
                     pmis = np.log(p_ii / (p_ij.mean(axis=-1) + 1e-6)[None, ...] + 1e-6)
@@ -157,10 +154,10 @@ if __name__ == "__main__":
 
                     mi = pmis.mean(axis=-1)
 
-                    MIs[sim_name][-1][-1].append(mi.tolist())#.item())
+                    MIs[sim_name][-1][-1].append(mi.item())
 
     for sim_name in sim_fns.keys():
-        print(f"MIs.shape: {np.array(MIs[sim_name]).shape}")
+        print(f"MIs.shape {sim_name}: {np.array(MIs[sim_name]).shape}")
 
     # create save dictionary
 
@@ -170,8 +167,7 @@ if __name__ == "__main__":
         "gamma_concentration": GAMMA_CONCENTRATION,
         "uniform_range": UNIFORM_RANGE,
         "seeds": SEEDS.tolist(),
-        "eps_cross": EPS_CROSS,
-        "eps_self": EPS_SELF,
+        "eps_sim": EPS_SIM,
     }
 
     if SAVE:

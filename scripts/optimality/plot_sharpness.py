@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 
 if __name__ == "__main__":
 
-    SAVE_NAME = "sharpness_512_eps1e-2"
+    SAVE_NAME = "sharpness_f256_s10000"
 
     data_folder = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -45,8 +45,10 @@ if __name__ == "__main__":
     with open(os.path.join(data_folder, SAVE_NAME + ".json"), "r") as f:
         data = json.load(f)
 
-    # MI shape - (n_nonzero, gamma_concentration, seeds)
-    MIs = np.array(data["MI"])
+    MIs = data["MI"]
+    for k in MIs.keys():
+        # MI shape - (n_nonzero, gamma_concentration, seeds)
+        MIs[k] = np.array(MIs[k])
     n_nonzero = data["n_nonzero"]
     gamma_concentration = data["gamma_concentration"]
     uniform_range = np.array(data["uniform_range"])
@@ -56,51 +58,63 @@ if __name__ == "__main__":
 
     fig = go.Figure()
 
-    for mi, n_nz in zip(MIs, n_nonzero):
-        hue = n_nz / max(7, max(n_nonzero))
-        lightness = 0.5
-        saturation = 0.7
-        color = generate_color(hue, lightness, saturation)
+    marker_symbols = ["circle", "x", "triangle-up", "square", "diamond", "cross"]
+    line_styles = ["solid", "dash", "dot", "dashdot", "longdash"]
 
-        # compute std for each gamma_concentration
-        mi_mean = mi.mean(axis=-1)
-        mi_std = mi.std(axis=-1)
+    for k, sim_k in enumerate(MIs.keys()):
+        for i, u_range in enumerate(uniform_range):
+            # select a single concentration
+            mi = MIs[sim_k][:, i, :]  # shape (n_nonzero, seeds)
+    
+            hue = i / len(uniform_range)
+            lightness = 0.5
+            saturation = 0.7
+            color = generate_color(hue, lightness, saturation)
 
-        # plot with error bars
-        fig.add_trace(
-            go.Scatter(
-                x=uniform_range[:, 0],
-                y=mi_mean,
-                error_y=dict(
-                    type="data",
-                    array=mi_std,
-                ),
-                mode="lines+markers",
-                name=f"{n_nz} features",
-                marker=dict(
-                    color=color,
-                    size=10,
-                ),
-                line=dict(
-                    width=2,
-                    color=color,
-                ),
+            # compute std for each gamma_concentration
+            mi_mean = mi.mean(axis=-1)
+            mi_std = mi.std(axis=-1)
+
+            # plot with error bars
+            fig.add_trace(
+                go.Scatter(
+                    x=n_nonzero,
+                    y=mi_mean,
+                    error_y=dict(
+                        type="data",
+                        array=mi_std,
+                    ),
+                    mode="lines+markers",
+                    name=f"{u_range[0]:.3f} - {sim_k}",
+                    marker=dict(
+                        color=color,
+                        size=10,
+                        symbol=marker_symbols[k],
+                    ),
+                    line=dict(
+                        width=2,
+                        color=color,
+                        dash=line_styles[k],
+                    ),
+                    legendgroup=f"{sim_k}"
+                )
             )
-        )
 
     fig.update_layout(
-        xaxis_title="Gamma concentration",
+        xaxis_title="Average non-zero units",
         yaxis_title="Mutual Information (bits)",
         width=800,
         height=600,
-        legend_title="Average Non-zero Features",
+        legend_title="Effect of Activation Sharpness",
         font=dict(size=14),
         template="plotly_white",
     )
 
+    # set x axis to log scale
+    # fig.update_xaxes(type="log")
     # set y axis properties
     fig.update_yaxes(
-        range=[0.0, 6.0],  # MIs.max() + 0.5], #
+        # range=[0.0, 6.0],  # MIs.max() + 0.5], #
         # ticks every 0.5
         dtick=0.5,
     )

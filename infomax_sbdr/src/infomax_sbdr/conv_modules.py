@@ -192,13 +192,13 @@ class VGGLayer(nn.Module):
 
     def __call__(self, x):
         x = self.conv1(x)
+        x = self.activation_fn(x)
         if self.use_batchnorm:
             x = self.bn1(x)
-        x = self.activation_fn(x)
         x = self.conv2(x)
+        x = self.activation_fn(x)
         if self.use_batchnorm:
             x = self.bn2(x)
-        x = self.activation_fn(x)
         x = self.pool(x)
         if self.use_dropout:
             x = self.dropout(x)
@@ -512,8 +512,8 @@ class VGGGlobalPool(nn.Module):
 
         self.dense_layers = nn.Sequential(
             [   
-                nn.Dense(features=self.out_features),
-                self.activation_fn,
+                # nn.Dense(features=self.out_features),
+                # self.activation_fn,
                 nn.Dense(features=self.out_features),
                 self.out_activation_fn,
             ]
@@ -523,8 +523,8 @@ class VGGGlobalPool(nn.Module):
         x = self.conv_layers(x)
         conv_shape = x.shape[-3:]
        # Perform Global Pooling
-        # x = np.mean(x, axis=(-3, -2))
-        x = np.max(x, axis=(-3, -2))
+        x = np.mean(x, axis=(-3, -2))
+        # x = np.max(x, axis=(-3, -2))
         x = self.dense_layers(x)
         return {"z": x, "conv_shape": conv_shape}
 

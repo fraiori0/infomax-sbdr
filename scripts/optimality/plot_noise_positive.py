@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 
 if __name__ == "__main__":
 
-    SAVE_NAME = "noise_positive_f256_s4096_multi"
+    SAVE_NAME = "noise_positive_f256_s10000"
 
     data_folder = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -59,9 +59,15 @@ if __name__ == "__main__":
 
     fig = go.Figure()
 
-    for sim_name in MIs.keys():
-        for mi, n_nz in zip(MIs[sim_name], n_nonzero):
-            hue = n_nz / max(7, max(n_nonzero))
+    marker_symbols = ["circle", "x", "triangle-up", "square", "diamond", "cross"]
+    line_styles = ["solid", "dash", "dot", "dashdot", "longdash"]
+
+    for k, sim_k in enumerate(MIs.keys()):
+        for i, n_prob in enumerate(noise_probs):
+            # select a single noise prob
+            mi = MIs[sim_k][:, i, :]  # shape (n_nonzero, seeds)
+    
+            hue = i / len(noise_probs)
             lightness = 0.5
             saturation = 0.7
             color = generate_color(hue, lightness, saturation)
@@ -73,39 +79,43 @@ if __name__ == "__main__":
             # plot with error bars
             fig.add_trace(
                 go.Scatter(
-                    x=noise_probs,
+                    x=n_nonzero,
                     y=mi_mean,
                     error_y=dict(
                         type="data",
                         array=mi_std,
                     ),
                     mode="lines+markers",
-                    name=f"{sim_name} {n_nz} features",
+                    name=f"{n_prob:.3f} - {sim_k}",
                     marker=dict(
                         color=color,
                         size=10,
+                        symbol=marker_symbols[k],
                     ),
                     line=dict(
                         width=2,
                         color=color,
+                        dash=line_styles[k],
                     ),
-                    legendgroup=f"{sim_name}",
+                    legendgroup=f"{sim_k}"
                 )
             )
 
     fig.update_layout(
-        xaxis_title="Positive Noise (p)",
-        yaxis_title="K-sample InfoNCE (nats)",
-        width=1000,
-        height=800,
-        legend_title="Average Non-zero Features",
+        xaxis_title="Average non-zero units",
+        yaxis_title="Mutual Information (bits)",
+        width=800,
+        height=600,
+        legend_title="Noise probability",
         font=dict(size=14),
         template="plotly_white",
     )
 
+    # set x axis to log scale
+    # fig.update_xaxes(type="log")
     # set y axis properties
     fig.update_yaxes(
-        range=[0.0, 6.0],  # MIs.max() + 0.5], #
+        # range=[0.0, 6.0],  # MIs.max() + 0.5], #
         # ticks every 0.5
         dtick=0.5,
     )
