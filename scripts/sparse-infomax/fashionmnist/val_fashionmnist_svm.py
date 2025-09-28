@@ -505,7 +505,6 @@ acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
 print(f"\tKNN accuracy (vote)")
 print(f"\t\tK={k} : {acc_knn_vote:.4f}")
 
-
 """---------------------"""
 """ Linear Support Vector Classification """
 """---------------------"""
@@ -520,10 +519,12 @@ print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
 
 svm_model = LinearSVC(
     random_state=0,
-    tol=1e-5,
+    tol=1e-4,
     multi_class="ovr",
-    dual=False,  # use primal solver, we have n_sample > n_features
-    intercept_scaling=10,
+    intercept_scaling=1,
+    C=5,
+    penalty="l1",
+    loss="squared_hinge",
 )
 
 print("\nTraining Linear SVM on the training set")
@@ -542,3 +543,29 @@ print(f"\tAccuracy on training set: {acc_train}")
 
 print(f"\tAccuracy on validation set: {acc_val}")
 
+
+# fit also a linear logistic regression for comparison
+from sklearn.linear_model import LogisticRegression
+
+logreg_model = LogisticRegression(
+    random_state=0,
+    tol=1e-4,
+    multi_class="multinomial",
+    C=1,
+    penalty="l1",
+    solver="saga",
+)
+
+print("\nTraining Linear Logistic Regression on the training set")
+t0 = time()
+
+logreg_model.fit(
+    zs,
+    labels_categorical,
+)
+
+acc_train_logreg = logreg_model.score(zs, labels_categorical)
+acc_val_logreg = logreg_model.score(zs_val, labels_categorical_val)
+print(f"\t  Time: {time() - t0:.2f} seconds")
+print(f"\tAccuracy on training set: {acc_train_logreg}")
+print(f"\tAccuracy on validation set: {acc_val_logreg}")
