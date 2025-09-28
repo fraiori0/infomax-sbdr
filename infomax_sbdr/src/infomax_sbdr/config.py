@@ -6,6 +6,8 @@ from infomax_sbdr.transforms import *
 import infomax_sbdr.binary_comparisons as bc
 from torch import nn as torch_nn
 import infomax_sbdr.classifier_modules as classifier_modules
+import infomax_sbdr.antihebbian_modules as ah
+
 
 """
 Convenience dictionaries to match strings in config files to functions and classes.
@@ -54,6 +56,10 @@ config_module_dict = {
     "VGGFLOMultiLayerNEGPMI": VGGFLOMultiLayerNEGPMI,
     "VGGDecoder": VGGDecoder,
     "VGGGlobalPoolFLOMultiLayerNEGPMI": VGGGlobalPoolFLOMultiLayerNEGPMI,
+}
+
+config_ah_module_dict = {
+    "AntiHebbianModule": ah.AntiHebbianModule,
 }
 
 config_classifier_module_dict = {
