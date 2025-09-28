@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] =  "3"
+os.environ["CUDA_VISIBLE_DEVICES"] =  "0"
 
 from functools import partial
 import argparse
@@ -441,55 +441,55 @@ if BINARIZE:
     zs_val = binarize_k_jitted(zs_val)
 
 
-"""---------------------"""
-""" K-Nearest Neighbors Classification """
-"""---------------------"""
+# """---------------------"""
+# """ K-Nearest Neighbors Classification """
+# """---------------------"""
 
-print("\nK-Nearest Neighbors Classification")
+# print("\nK-Nearest Neighbors Classification")
 
-# # # Compute "distances" using the similarity metrics
-sim_fn = jit(partial(
-    sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
-    **model_config["validation"]["sim_fn"]["kwargs"],
-))
+# # # # Compute "distances" using the similarity metrics
+# sim_fn = jit(partial(
+#     sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
+#     **model_config["validation"]["sim_fn"]["kwargs"],
+# ))
 
-ds_val = -sim_fn(zs_val[:, None], zs[None, :])
+# ds_val = -sim_fn(zs_val[:, None], zs[None, :])
 
-print(f"\tDistances shape: {ds_val.shape}")
+# print(f"\tDistances shape: {ds_val.shape}")
 
-# For each example in the validation set, find the k nearest neighbors in the training set
-k = 19
-# Use jax.lax.top_k to find the index of the k nearest neighbors
-nearest_indices = jax.lax.top_k(-ds_val, k=k)[1]
-# np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
-print(f"\tNearest indices shape: {nearest_indices.shape}")
-# Select the labels of the k nearest neighbors
-nearest_labels = labels_onehot[nearest_indices]
-print(f"\tNearest labels shape: {nearest_labels.shape}")
+# # For each example in the validation set, find the k nearest neighbors in the training set
+# k = 19
+# # Use jax.lax.top_k to find the index of the k nearest neighbors
+# nearest_indices = jax.lax.top_k(-ds_val, k=k)[1]
+# # np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
+# print(f"\tNearest indices shape: {nearest_indices.shape}")
+# # Select the labels of the k nearest neighbors
+# nearest_labels = labels_onehot[nearest_indices]
+# print(f"\tNearest labels shape: {nearest_labels.shape}")
 
-# Check how many of the k nearest neighbors have the same label as the validation example
-correct_mask = (labels_onehot_val[:, None] * nearest_labels).sum(axis=-1)  # shape: (n_val, k)
-print(f"\tCorrect mask shape: {correct_mask.shape}")
+# # Check how many of the k nearest neighbors have the same label as the validation example
+# correct_mask = (labels_onehot_val[:, None] * nearest_labels).sum(axis=-1)  # shape: (n_val, k)
+# print(f"\tCorrect mask shape: {correct_mask.shape}")
 
-# Compute the accuracy as the fraction of correct neighbors
-acc_knn = correct_mask.mean()
+# # Compute the accuracy as the fraction of correct neighbors
+# acc_knn = correct_mask.mean()
 
-correct_avg = correct_mask.mean(axis=-1)
+# correct_avg = correct_mask.mean(axis=-1)
 
-print(f"\tKNN accuracy: {acc_knn}")
-print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std()}")
+# print(f"\tKNN accuracy: {acc_knn}")
+# print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std()}")
 
-# Compute accuracy according to neighbor vote (with equal weights)
-average_label = (nearest_labels.mean(axis=-2))
-print(f"\tAverage label shape: {average_label.shape}")
-# print(average_label[:5])
-# Convert to categorical labels
-labels_categorical_knn_val = average_label.argmax(axis=-1)
-# Compute accuracy
-acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
+# # Compute accuracy according to neighbor vote (with equal weights)
+# average_label = (nearest_labels.mean(axis=-2))
+# print(f"\tAverage label shape: {average_label.shape}")
+# # print(average_label[:5])
+# # Convert to categorical labels
+# labels_categorical_knn_val = average_label.argmax(axis=-1)
+# # Compute accuracy
+# acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
 
-print(f"\tKNN accuracy (vote)")
-print(f"\t\tK={k} : {acc_knn_vote:.4f}")
+# print(f"\tKNN accuracy (vote)")
+# print(f"\t\tK={k} : {acc_knn_vote:.4f}")
 
 
 """---------------------"""
@@ -503,6 +503,7 @@ print("\nLinear Support Vector Classification")
 print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
 print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
 
+from sklearn.linear_model import LogisticRegression
 
 svm_model = LinearSVC(
     random_state=0,
@@ -510,8 +511,20 @@ svm_model = LinearSVC(
     multi_class="ovr",
     # dual=False,  # use primal solver, we have n_sample > n_features
     intercept_scaling=100,
-    loss="hinge",
+    C=0.1,
+    loss="squared_hinge",
     penalty="l1",
+)
+
+log_regr_model = LogisticRegression(
+    random_state=0,
+    tol=1e-4,
+    multi_class="multinomial",
+    solver="saga",
+    intercept_scaling=100,
+    C=1.0,
+    penalty="l1",
+    max_iter=1000,
 )
 
 print("\nTraining Linear SVM on the training set")
@@ -529,4 +542,21 @@ print(f"\t  Time: {time() - t0:.2f} seconds")
 print(f"\tAccuracy on training set: {acc_train}")
 
 print(f"\tAccuracy on validation set: {acc_val}")
+
+print("\nTraining Logistic Regression on the training set")
+t0 = time()
+
+log_regr_model.fit(
+    zs,
+    labels_categorical,
+)
+
+acc_train_log = log_regr_model.score(zs, labels_categorical)
+acc_val_log = log_regr_model.score(zs_val, labels_categorical_val)
+
+print(f"\t  Time: {time() - t0:.2f} seconds")
+
+print(f"\tAccuracy on training set: {acc_train_log}")
+
+print(f"\tAccuracy on validation set: {acc_val_log}")
 
