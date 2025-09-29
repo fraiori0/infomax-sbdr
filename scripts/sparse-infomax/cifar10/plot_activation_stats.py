@@ -24,10 +24,12 @@ models = {
     "vgg_gavg_sigmoid_logand": {
         "1": {"name": r"$\epsilon = 1e-2$", "chkp": 250, "color": "blue", "dash": "solid", "symbol":"circle"},
         "2": {"name": r"$\epsilon = 1e0$", "chkp": 250, "color": "blue", "dash": "solid", "symbol":"circle"},
+        "3": {"name": r"$\epsilon = 1e-1$", "chkp": 230, "color": "blue", "dash": "solid", "symbol":"circle"},
     },
     "vgg_gavg_sigmoid_and": {
         "1": {"name": r"$\alpha = 1.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
         "2_bis": {"name": r"$\alpha = 4.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
+        "3": {"name": r"$\alpha = 8.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
     },
 }
 
