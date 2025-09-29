@@ -41,9 +41,9 @@ BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is Tr
 
 # remember to change the pooling function in model definition, if using global pool model
 default_model = "vgg_gavg_sigmoid_logand" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "1"
+default_number = "2"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 130  # 102
+default_step = 250  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -432,6 +432,27 @@ for i, th in enumerate(th_active):
     )
 
 """---------------------"""
+""" Save activations """
+"""---------------------"""
+
+# save the activations to a compressed npz file
+save_folder = os.path.join(
+    model_folder,
+    "activations",
+)
+os.makedirs(save_folder, exist_ok=True)
+
+onp.savez_compressed(
+    os.path.join(save_folder, f"activations_chkp_{default_step:03d}.npz"),
+    zs=onp.array(zs),
+    labels_onehot=onp.array(labels_onehot),
+    zs_val=onp.array(zs_val),
+    labels_onehot_val=onp.array(labels_onehot_val),
+)
+
+exit()
+
+"""---------------------"""
 """ Binarize/Sparsify encodings """
 """---------------------"""
 
@@ -517,10 +538,12 @@ print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
 
 svm_model = LinearSVC(
     random_state=0,
-    tol=1e-5,
+    tol=1e-4,
     multi_class="ovr",
-    dual=False,  # use primal solver, we have n_sample > n_features
-    intercept_scaling=10,
+    intercept_scaling=1,
+    C=5,
+    penalty="l1",
+    loss="squared_hinge",
 )
 
 print("\nTraining Linear SVM on the training set")
@@ -539,3 +562,29 @@ print(f"\tAccuracy on training set: {acc_train}")
 
 print(f"\tAccuracy on validation set: {acc_val}")
 
+
+# fit also a linear logistic regression for comparison
+from sklearn.linear_model import LogisticRegression
+
+logreg_model = LogisticRegression(
+    random_state=0,
+    tol=1e-4,
+    multi_class="multinomial",
+    C=1,
+    penalty="l1",
+    solver="saga",
+)
+
+print("\nTraining Linear Logistic Regression on the training set")
+t0 = time()
+
+logreg_model.fit(
+    zs,
+    labels_categorical,
+)
+
+acc_train_logreg = logreg_model.score(zs, labels_categorical)
+acc_val_logreg = logreg_model.score(zs_val, labels_categorical_val)
+print(f"\t  Time: {time() - t0:.2f} seconds")
+print(f"\tAccuracy on training set: {acc_train_logreg}")
+print(f"\tAccuracy on validation set: {acc_val_logreg}")
