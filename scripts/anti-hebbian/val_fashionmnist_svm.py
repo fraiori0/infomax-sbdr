@@ -421,6 +421,27 @@ for i, th in enumerate(th_active):
     )
 
 """---------------------"""
+""" Save activations """
+"""---------------------"""
+
+# save the activations to a compressed npz file
+save_folder = os.path.join(
+    model_folder,
+    "activations",
+)
+os.makedirs(save_folder, exist_ok=True)
+
+onp.savez_compressed(
+    os.path.join(save_folder, f"activations_chkp_{default_step:03d}.npz"),
+    zs=onp.array(zs),
+    labels_onehot=onp.array(labels_onehot),
+    zs_val=onp.array(zs_val),
+    labels_onehot_val=onp.array(labels_onehot_val),
+)
+
+exit()
+
+"""---------------------"""
 """ Binarize/Sparsify encodings """
 """---------------------"""
 

@@ -40,10 +40,10 @@ BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "dense_sigmoid_logand" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "2"
+default_model = "dense_sigmoid_and" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 140  # 102
+default_step = 150  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -53,8 +53,6 @@ base_folder = os.path.join(
     os.pardir,
 )
 base_folder = os.path.normpath(base_folder)
-
-
 
 
 """---------------------"""
@@ -433,6 +431,28 @@ for i, th in enumerate(th_active):
     print(
         f"\t  {count_unused[i]}"
     )
+
+"""---------------------"""
+""" Save activations """
+"""---------------------"""
+
+# save the activations to a compressed npz file
+save_folder = os.path.join(
+    model_folder,
+    "activations",
+)
+os.makedirs(save_folder, exist_ok=True)
+
+onp.savez_compressed(
+    os.path.join(save_folder, f"activations_chkp_{default_step:03d}.npz"),
+    zs=onp.array(zs),
+    labels_onehot=onp.array(labels_onehot),
+    zs_val=onp.array(zs_val),
+    labels_onehot_val=onp.array(labels_onehot_val),
+)
+
+exit()
+
 
 """---------------------"""
 """ Binarize/Sparsify encodings """
