@@ -3,3 +3,6 @@ checkpoints/
 pretrained/
 
 cifar100/
+
+__pycache__/
+*.pyc
