@@ -23,13 +23,13 @@ def and_name(alpha: str = ""):
 models = {
     "vgg_gavg_sigmoid_logand": {
         "1": {"name": r"$\epsilon = 1e-2$", "chkp": 250, "color": "blue", "dash": "solid", "symbol":"circle"},
-        "2": {"name": r"$\epsilon = 1e0$", "chkp": 250, "color": "blue", "dash": "solid", "symbol":"circle"},
         "3": {"name": r"$\epsilon = 1e-1$", "chkp": 230, "color": "blue", "dash": "solid", "symbol":"circle"},
+        "2": {"name": r"$\epsilon = 1e0$", "chkp": 250, "color": "blue", "dash": "solid", "symbol":"circle"},
     },
     "vgg_gavg_sigmoid_and": {
-        "1": {"name": r"$\alpha = 1.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
-        "2_bis": {"name": r"$\alpha = 4.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
         "3": {"name": r"$\alpha = 8.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
+        "2_bis": {"name": r"$\alpha = 4.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
+        "1": {"name": r"$\alpha = 1.0$", "chkp": 250, "color": "blue", "dash": "dash", "symbol":"x"},
     },
 }
 
@@ -103,6 +103,7 @@ for i, k in enumerate(k_types_and_subtitles[0]):
                 nbinsx=50,
                 histnorm="probability",
                 # marker_color=models[k][kk]["color"],
+                legend=f"legend{i+1}"
             ),
             row=1,
             col=i+1,
@@ -127,11 +128,15 @@ for i, k in enumerate(k_types_and_subtitles[0]):
         col=i+1,
         tickfont=dict(size=16, family="Times New Roman"),
     )
+    # position the legend for this subplot
+    fig.update_layout(
+        **{f"legend{i+1}":dict(x=0.2+0.5*i, y=0.98, xanchor='right', yanchor='top'),}
+    )
 
 fig.update_layout(
     # title_text=r"Per-unit distribution of average activity",
     barmode="overlay",
-    legend=dict(x=0.01, y=0.99),
+    # legend=dict(x=0.01, y=0.99),
     width=1200,
     height=600,
     template="plotly_white",
@@ -139,7 +144,7 @@ fig.update_layout(
 fig.show()
 
 
-
+# exit()
 """---------------------"""
 """ Plot PER-SAMPLE distribution of average activity """
 """---------------------"""
@@ -165,6 +170,7 @@ for i, k in enumerate(k_types_and_subtitles[0]):
                 nbinsx=50,
                 histnorm="probability",
                 # marker_color=models[k][kk]["color"],
+                legend=f"legend{i+1}"
             ),
             row=1,
             col=i+1,
@@ -189,6 +195,10 @@ for i, k in enumerate(k_types_and_subtitles[0]):
         col=i+1,
         tickfont=dict(size=16, family="Times New Roman"),
     )
+    # position the legend for this subplot
+    fig.update_layout(
+        **{f"legend{i+1}":dict(x=0.2+0.5*i, y=0.98, xanchor='right', yanchor='top'),}
+    )
 
 fig.update_layout(
     # title_text=r"Per-unit distribution of average activity",
@@ -205,7 +215,7 @@ fig.show()
 """ Classification accuracy with varying level of sparsification """
 """---------------------"""
 
-N_K = [5, 10, 15, 20, 25]
+N_K = [256, 25, 20, 15, 10, 5]
 
 # For each model, train a linear SVM after sparsifying the activations by keeping only the k highest activations per sample
 
@@ -223,12 +233,13 @@ def keep_top_k(x, k):
 # NOTE, this nested cycles takes a while to run
 for n_top_k in tqdm(N_K):
 
+    sparsity = 1.0 - n_top_k/256.0
     keep_top_k_jitted = jax.jit(partial(keep_top_k, k=n_top_k))
 
     for k in tqdm(models.keys(), total=len(models.keys()), leave=False):
         for kk in tqdm(models[k].keys(), total=len(models[k].keys()), leave=False):
             
-            # take_first = 5000  # to speed up the process for debugging
+            take_first = 20  # to speed up the process for debugging
             
             zs = models[k][kk]["data"]["zs"].copy()#[:take_first]
             zs_val = models[k][kk]["data"]["zs_val"].copy()#[:take_first]
@@ -238,8 +249,9 @@ for n_top_k in tqdm(N_K):
             labels_categorical = labels_onehot.argmax(axis=-1)
             labels_categorical_val = labels_onehot_val.argmax(axis=-1)
 
-            zs = keep_top_k_jitted(zs)
-            zs_val = keep_top_k_jitted(zs_val)
+            if sparsity > 0.1:
+                zs = keep_top_k_jitted(zs)
+                zs_val = keep_top_k_jitted(zs_val)
 
             svm_model = LinearSVC(
                 random_state=0,
@@ -281,15 +293,17 @@ for k in models.keys():
 """---------------------"""
 
 fig = go.Figure()
-
+sparsities = 1.0 - np.array(N_K)/256.0
+log_sparsities = 25.0**sparsities
 for k in models.keys():
     for kk in models[k].keys():
         
-        accs_val = [models[k][kk]["svm_acc"][n_top_k]["val"] for n_top_k in N_K]
+        accs_val = np.array([models[k][kk]["svm_acc"][n_top_k]["val"] for n_top_k in N_K])
+        
 
         fig.add_trace(
             go.Scatter(
-                x=N_K,
+                x=log_sparsities,
                 y=accs_val,
                 mode="lines+markers",
                 name=models[k][kk]["name"],
@@ -307,23 +321,25 @@ for k in models.keys():
 # Set font and axis titles
 fig.update_xaxes(
     title=dict(
-        text=r"Non-zero features ($k$)",
+        text="Non-zero features",
         font=dict(size=18, family="Times New Roman")),
     tickfont=dict(size=16, family="Times New Roman"),
-    dtick=5,
+    # place ticks at the values of sparsities
+    tickvals=log_sparsities,
+    ticktext=[f"{k}" for k in N_K],
 )
 
 fig.update_yaxes(
     title=dict(
-        text=r"Accuracy",
+        text="Accuracy (%)",
         font=dict(size=18, family="Times New Roman")),
     tickfont=dict(size=16, family="Times New Roman"),
     # range=[0.7, 0.92],
 )
 
 fig.update_layout(
-    title_text=r"Classification accuracy vs. sparsification",
-    legend=dict(x=0.01, y=0.99),
+    # title_text=r"Classification accuracy vs. sparsification",
+    # legend=dict(x=0.01, y=0.99),
     width=700,
     height=500,
     template="plotly_white",
