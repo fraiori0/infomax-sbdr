@@ -9,6 +9,9 @@ import numpy as onp
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
+from tqdm import tqdm
+from functools import partial
+from sklearn.svm import LinearSVC
 
 np.set_printoptions(precision=4, suppress=True)
 pio.renderers.default = "browser"
@@ -16,7 +19,10 @@ pio.renderers.default = "browser"
 
 models = {
     "standard": {
-        "1": {"name": r"$p^* = 0.05$", "chkp": 20, "color": "blue"},
+        "3": {"name": r"$p_* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
+        "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#ff7f0e", "dash": "solid", "symbol": "circle"},
+        "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
+        "4": {"name": r"$p_* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
     },
 }
 
@@ -28,6 +34,15 @@ base_folder = os.path.join(
 )
 base_folder = os.path.normpath(base_folder)
 
+
+result_folder = os.path.join(
+    base_folder,
+    "resources",
+    "results",
+    "antihebbian",
+)
+if not os.path.exists(result_folder):
+    os.makedirs(result_folder)
 
 """---------------------"""
 """ Import activation data """
@@ -80,8 +95,8 @@ for i, k in enumerate(models.keys()):
             go.Histogram(
                 x=avg_act,
                 name=models[k][kk]["name"],
-                # opacity=0.5,
-                nbinsx=50,
+                opacity=0.5,
+                # nbinsx=50,
                 histnorm="probability",
                 marker_color=models[k][kk]["color"],
             ),
@@ -134,3 +149,157 @@ fig.update_layout(
     showlegend=False,
 )
 fig.show()
+
+# export image as PDF
+fig.write_image(
+    os.path.join(
+        result_folder,
+        "activation_stats.pdf"
+    ),
+    format="pdf"
+)
+
+"""---------------------"""
+""" Classification accuracy with varying level of sparsification """
+"""---------------------"""
+
+N_K = [512, 50, 40, 30, 20, 10]
+
+# For each model, train a linear SVM after sparsifying the activations by keeping only the k highest activations per sample
+
+def keep_top_k(x, k):
+    """ Keep only the k highest activations per sample, set rest to 0 """
+    # x: (n_samples, n_features)
+    # output: (n_samples, n_features)
+    def keep_top_k_single(x_single, k):
+        thresh = np.partition(x_single, -k)[-k]
+        return np.where(x_single >= thresh, x_single, 0.0)
+    # vmap over samples
+    return jax.vmap(partial(keep_top_k_single, k=k))(x)
+
+
+# NOTE, this nested cycles takes a while to run
+for n_top_k in tqdm(N_K):
+
+    sparsity = 1.0 - n_top_k/256.0
+    keep_top_k_jitted = jax.jit(partial(keep_top_k, k=n_top_k))
+
+    for k in tqdm(models.keys(), total=len(models.keys()), leave=False):
+        for kk in tqdm(models[k].keys(), total=len(models[k].keys()), leave=False):
+            
+            take_first = 20  # to speed up the process for debugging
+            
+            zs = models[k][kk]["data"]["zs"].copy()#[:take_first]
+            zs_val = models[k][kk]["data"]["zs_val"].copy()#[:take_first]
+            labels_onehot = models[k][kk]["data"]["labels_onehot"].copy()#[:take_first]
+            labels_onehot_val = models[k][kk]["data"]["labels_onehot_val"].copy()#[:take_first]
+
+            labels_categorical = labels_onehot.argmax(axis=-1)
+            labels_categorical_val = labels_onehot_val.argmax(axis=-1)
+
+            if sparsity > 0.1:
+                zs = keep_top_k_jitted(zs)
+                zs_val = keep_top_k_jitted(zs_val)
+
+            svm_model = LinearSVC(
+                random_state=0,
+                tol=1e-4,
+                multi_class="ovr",
+                intercept_scaling=1,
+                C=8,
+                penalty="l1",
+                loss="squared_hinge",
+                max_iter=2000,
+            )
+
+            svm_model.fit(
+                zs,
+                labels_categorical,
+            )
+            acc_train = svm_model.score(zs, labels_categorical)
+            acc_val = svm_model.score(zs_val, labels_categorical_val)
+
+            models[k][kk].setdefault("svm_acc", {})
+
+            models[k][kk]["svm_acc"][n_top_k] = {
+                "train": acc_train,
+                "val": acc_val,
+            }
+
+for k in models.keys():
+    for kk in models[k].keys():
+        print(f"{k} - {kk}")
+        print("n_top_k\ttrain\tval")
+        for n_top_k in N_K:
+            accs = models[k][kk]["svm_acc"][n_top_k]
+            print(f"{n_top_k}\t{accs['train']:.4f}\t{accs['val']:.4f}")
+        print()
+
+
+"""---------------------"""
+""" plot the accuracy as a function of n_top_k """
+"""---------------------"""
+
+fig = go.Figure()
+sparsities = 1.0 - np.array(N_K)/256.0
+log_sparsities = 25.0**sparsities
+for k in models.keys():
+    for kk in models[k].keys():
+        
+        accs_val = np.array([models[k][kk]["svm_acc"][n_top_k]["val"] for n_top_k in N_K])
+        
+
+        fig.add_trace(
+            go.Scatter(
+                x=log_sparsities,
+                y=accs_val,
+                mode="lines+markers",
+                name=models[k][kk]["name"],
+                line=dict(
+                    # color=models[k][kk]["color"],
+                    dash=models[k][kk]["dash"],
+                ),
+                marker=dict(
+                    symbol=models[k][kk]["symbol"],
+                    size=10,
+                ),
+            )
+        )
+
+# Set font and axis titles
+fig.update_xaxes(
+    title=dict(
+        text="Non-zero features",
+        font=dict(size=18, family="Times New Roman")),
+    tickfont=dict(size=16, family="Times New Roman"),
+    # place ticks at the values of sparsities
+    tickvals=log_sparsities,
+    ticktext=[f"{k}" for k in N_K],
+)
+
+fig.update_yaxes(
+    title=dict(
+        text="Accuracy (%)",
+        font=dict(size=18, family="Times New Roman")),
+    tickfont=dict(size=16, family="Times New Roman"),
+    # range=[0.7, 0.92],
+)
+
+fig.update_layout(
+    # title_text=r"Classification accuracy vs. sparsification",
+    # legend=dict(x=0.01, y=0.99),
+    width=1200,
+    height=700,
+    template="plotly_white",
+)
+
+fig.show()
+
+# export image as PDF
+fig.write_image(
+    os.path.join(
+        result_folder,
+        "svm_accuracy_vs_sparsity.pdf"
+    ),
+    format="pdf"
+)

@@ -64,3 +64,4 @@ use sharp activation
 ```bash
 /home/fra/PyEnvs/hhamster/bin/python /home/fra/Documents/PhD/Research/infomax-sbdr/scripts/sparse-infomax/fashionmnist/train_fashionmnist_contrastive_floexp_L1.py --model dense_sigmoid_and --number 1
 ```
+
