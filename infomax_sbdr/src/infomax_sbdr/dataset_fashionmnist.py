@@ -16,7 +16,11 @@ class FashionMNISTDataset(Dataset):
         transform: Callable = None,
         flatten: bool = False,
         device = None,
+        sequential = False
     ) -> None:
+        
+        if sequential and flatten:
+            raise ValueError("\'sequential\' and \'flatten\' are mutually exclusive, they cannot both be True")
 
         super().__init__()
 
@@ -26,6 +30,8 @@ class FashionMNISTDataset(Dataset):
         self.folder_path = folder_path
         self.transform = transform
         self.flatten = flatten
+        self.device = device
+        self.sequential = sequential
 
         # adjust the 'kind' string to match the file names for the FashionMNIST
         if kind == "test":
@@ -77,6 +83,12 @@ class FashionMNISTDataset(Dataset):
 
         if self.flatten:
             img = img.view(-1)
+        
+        if self.sequential:
+            # return a sample of shape (28,28),
+            # where rows are taken to be different time-stpes, and the columns are the actual input
+            # i.e., the so-called Sequential FashionMNIST
+            img = img.view(28, 28)
 
         return img, label
 
@@ -89,6 +101,7 @@ class FashionMNISTDatasetContrastive(FashionMNISTDataset):
         transform: Callable = None,
         flatten: bool = False,
         device = None,
+        sequential = False,
     ) -> None:
         super().__init__(
             folder_path=folder_path,
@@ -96,6 +109,7 @@ class FashionMNISTDatasetContrastive(FashionMNISTDataset):
             transform=transform,
             flatten=flatten,
             device=device,
+            sequential=sequential
         )
 
     # we change only the __getitem__ method
