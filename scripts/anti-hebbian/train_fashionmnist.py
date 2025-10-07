@@ -3,7 +3,7 @@ import argparse
 
 
 default_model = "standard"
-default_number = "1"
+default_number = "4"
 
 default_cuda = "0"
 
