@@ -21,6 +21,16 @@ if __name__ == "__main__":
 
     SAVE_NAME = "sharpness_f256_s10000"
 
+    sim_names = {
+        "log_and": r"$g_{\epsilon}$",
+    }
+    fig_size={
+        "width": 800,
+        "height": 500
+    }
+
+    font_family = "Latin Modern Roman"
+
     data_folder = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         os.pardir,
@@ -37,7 +47,7 @@ if __name__ == "__main__":
         os.pardir,
         os.pardir,
         "resources",
-        "figs",
+        "results",
         "infomax optimality",
         "sharpness",
     )
@@ -65,13 +75,13 @@ if __name__ == "__main__":
     marker_symbols = ["circle", "x", "triangle-up", "square", "diamond", "cross"]
     line_styles = ["solid", "dash", "dot", "dashdot", "longdash"]
 
-    for k, sim_k in enumerate(MIs.keys()):
+    for k, sim_k in enumerate(sim_names):
         for i, u_range in enumerate(uniform_range):
             # select a single concentration
             mi = MIs[sim_k][:, i, :]  # shape (n_nonzero, seeds)
     
             hue = i / len(uniform_range)
-            lightness = 0.5
+            lightness = 0.6
             saturation = 0.7
             color = generate_color(hue, lightness, saturation)
 
@@ -89,7 +99,7 @@ if __name__ == "__main__":
                         array=mi_std,
                     ),
                     mode="lines+markers",
-                    name=f"{u_range[0]:.3f} - {sim_k}",
+                    name=str(round(float(u_range[0]), 3)),
                     marker=dict(
                         color=color,
                         size=10,
@@ -104,13 +114,34 @@ if __name__ == "__main__":
                 )
             )
 
+    fig.update_xaxes(
+        title=dict(
+            text=r"Average number of non-zero units",
+            font=dict(size=20, family=font_family)),
+        tickfont=dict(size=18, family=font_family),
+    )
+
+    fig.update_yaxes(
+        title=dict(
+            text=r"Mutual Information (nats)",
+            font=dict(size=20, family=font_family)),
+        tickfont=dict(size=18, family=font_family),
+    )
+
     fig.update_layout(
-        xaxis_title="Average non-zero units",
-        yaxis_title="Mutual Information (bits)",
-        width=800,
-        height=600,
-        legend_title="Effect of Activation Sharpness",
-        font=dict(size=14),
+        **fig_size,
+        legend=dict(
+            title=r"$a_{min}$",
+            x = 1.1,
+            y = 1.0,
+            xanchor='left',
+            yanchor='top',
+            font=dict(size=18, family=font_family),
+            # title font size
+            title_font=dict(size=20, family=font_family),
+            # borderwidth=10,
+        ),
+        # font=dict(size=20, family=font_family),
         template="plotly_white",
     )
 
@@ -126,7 +157,10 @@ if __name__ == "__main__":
     fig.show()
 
     if SAVE:
-        fig.write_html(
-            os.path.join(save_folder, SAVE_NAME + ".html"),
-            include_plotlyjs="directory",
+        # export as svg
+        fig.write_image(
+            os.path.join(save_folder, SAVE_NAME + ".svg"),
+            format="svg",
+            **fig_size,
+            scale=3,
         )

@@ -20,7 +20,7 @@ pio.renderers.default = "browser"
 models = {
     "standard": {
         "3": {"name": r"$p_* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
-        "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#ff7f0e", "dash": "solid", "symbol": "circle"},
+        "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
         "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
         "4": {"name": r"$p_* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
     },
@@ -43,6 +43,17 @@ result_folder = os.path.join(
 )
 if not os.path.exists(result_folder):
     os.makedirs(result_folder)
+
+
+fig_layout_double_subplot = {
+    "height": 500,
+    "width": 1000,
+}
+fig_layout_single = {
+    "height": 500,
+    "width": 700,   
+}
+
 
 """---------------------"""
 """ Import activation data """
@@ -72,6 +83,53 @@ for k in models.keys():
         n_models += 1
 
 
+
+"""---------------------"""
+""" Compute PER-UNIT and PER-SAMPLE distribution of average activity """
+"""---------------------"""
+
+# First, compute manual bins for the histograms
+# Indeed, a lot of units in the "and" models are exactly or almost 0, so we would like more bins there
+per_unit_activity_bins = {}
+per_sample_activity_bins = {}
+
+low_exponent_unit = -3
+low_exponent_sample = np.log10(1/256 - 1e-6).item()
+
+max_bin = 0
+min_bin_center_unit = (10**low_exponent_unit)*0.7
+min_bin_center_sample = (10**low_exponent_sample)*0.7
+
+for k in models.keys():
+    per_unit_activity_bins[k] = {}
+    per_sample_activity_bins[k] = {}
+    for kk in models[k].keys():        
+
+        avg_act_unit = models[k][kk]["data"]["zs"].mean(axis=0)
+        tot_act_sample = models[k][kk]["data"]["zs"].sum(axis=1)
+
+        # take the maximum avg_act
+        max_avg_act_unit = np.max(avg_act_unit)
+        max_tot_act_sample = np.max(tot_act_sample)
+
+        # create 50 bins in logarithmic scale from 1e-4 to max_avg_act
+        bins_unit = np.logspace(low_exponent_unit, np.log10(max_avg_act_unit+1e-4), 50)
+        # for the sample activity, instead, we already know is discretized by integer value from 0 to max_tot_act_sample
+        bins_sample = np.arange(1, 50, 1, dtype=np.float32)/256
+
+        # pre-pend an initial 0
+        bins_unit = np.concatenate((np.zeros(1), bins_unit))
+        bins_sample = np.concatenate((np.zeros(1), bins_sample))
+
+        per_unit_activity_bins[k][kk] = bins_unit
+        per_sample_activity_bins[k][kk] = bins_sample
+
+        if max_avg_act_unit > max_bin:
+            max_bin = max_avg_act_unit+1e-4
+
+        if max_tot_act_sample > max_bin:
+            max_bin = max_tot_act_sample+1e-4
+
 """---------------------"""
 """ Plot PER-UNIT and PER-SAMPLE distribution of average activity """
 """---------------------"""
@@ -82,6 +140,8 @@ fig = make_subplots(
         "Units",
         "Samples",
     ),
+    horizontal_spacing=0.1,
+    vertical_spacing=0.15,
 )
 
 for i, k in enumerate(models.keys()):
@@ -89,47 +149,72 @@ for i, k in enumerate(models.keys()):
         
         avg_act = models[k][kk]["data"]["zs"].mean(axis=0)
 
-        print(avg_act.shape)
+        edge_centers = 0.5 * (per_unit_activity_bins[k][kk][1:] + per_unit_activity_bins[k][kk][:-1])
+        edges = per_unit_activity_bins[k][kk]
+        counts, _ = np.histogram(avg_act, bins=edges)
+        # normalize counts to sum to 1
+        counts = counts / np.sum(counts)
 
         fig.add_trace(
-            go.Histogram(
-                x=avg_act,
+            go.Bar(
+                x=edge_centers,
+                y=counts,
                 name=models[k][kk]["name"],
                 opacity=0.5,
-                # nbinsx=50,
-                histnorm="probability",
+                # nbinsx=100,
+                # histnorm="probability",
                 marker_color=models[k][kk]["color"],
+                legend=f"legend{i+1}",
+                width=(edges[1:] - edges[:-1]),
             ),
-            row=1, col=1
-        )
+            row=1,
+            col=1,
+        )            
+
 
 for i, k in enumerate(models.keys()):
     for kk in models[k].keys():
         
         avg_act = models[k][kk]["data"]["zs"].mean(axis=-1)
 
-        print(avg_act.shape)
+        edge_centers = 0.5 * (per_sample_activity_bins[k][kk][1:] + per_sample_activity_bins[k][kk][:-1])
+        edges = per_sample_activity_bins[k][kk]
+        counts, _ = np.histogram(avg_act, bins=edges)
+        # normalize counts to sum to 1
+        counts = counts / np.sum(counts)
 
         fig.add_trace(
-            go.Histogram(
-                x=avg_act,
+            go.Bar(
+                x=edge_centers,
+                y=counts,
                 name=models[k][kk]["name"],
                 opacity=0.5,
-                # nbinsx=50,
-                histnorm="probability",
+                # nbinsx=100,
+                # histnorm="probability",
                 marker_color=models[k][kk]["color"],
+                legend=f"legend{i+1}",
+                width=(edges[1:] - edges[:-1]),
             ),
-            row=1, col=2
-        )
+            row=1,
+            col=2,
+        )   
 
-for i in range(2):
-    # Set font and axis titles
+
+# Set font and axis titles
+for i, (min_bin_center, low_exponent) in enumerate(zip([min_bin_center_unit, min_bin_center_sample], [low_exponent_unit, low_exponent_sample])):
     fig.update_xaxes(
         title=dict(
-            text=r"Average activity",
+            text=r"Average activity (log-scale)",
             font=dict(size=18, family="Times New Roman")),
         tickfont=dict(size=16, family="Times New Roman"),
-        row=1, col=i+1
+        row=1,
+        col=i+1,
+        # log scale
+        type="log",
+        # set range explicitly
+        range=[np.log10(min_bin_center_unit), np.log10(1.01)],
+        # add ticks at powers of 10
+        tickvals=[10**j for j in range(int(low_exponent), 1)],
     )
     fig.update_yaxes(
         title=dict(
@@ -143,8 +228,7 @@ fig.update_layout(
     # title_text=r"Per-unit distribution of average activity",
     barmode="overlay",
     legend=dict(x=0.01, y=0.99),
-    width=1200,
-    height=600,
+    **fig_layout_double_subplot,
     template="plotly_white",
     showlegend=False,
 )
@@ -156,8 +240,12 @@ fig.write_image(
         result_folder,
         "activation_stats.pdf"
     ),
-    format="pdf"
+    format="pdf",
+    **fig_layout_double_subplot,
+    scale=3,
 )
+
+exit()
 
 """---------------------"""
 """ Classification accuracy with varying level of sparsification """

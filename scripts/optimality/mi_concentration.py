@@ -28,7 +28,7 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    N_SEEDS = 10
+    N_SEEDS = 15
     SEEDS = 50 * np.arange(N_SEEDS)
 
     # Number of features (i.e., dimension of a single sample)
@@ -45,11 +45,11 @@ if __name__ == "__main__":
     # Range for the uniform sampling of the activation level, after selecting the non-zero units
     UNIFORM_RANGE = (0.9, 1.0)
     # Similarity bias
-    EPS_SIM =1e-4
+    EPS_SIM =1e-2
 
     sim_fns = {
-        "exp_log_and": jit(sbdr.exp_log_and),
-        "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
+        "log_and": jit(sbdr.log_and),
+        # "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
     }
 
     MIs = {sim_name: [] for sim_name in sim_fns.keys()}

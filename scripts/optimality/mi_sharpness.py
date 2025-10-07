@@ -28,7 +28,7 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    N_SEEDS = 10
+    N_SEEDS = 15
     SEEDS = 50 * np.arange(N_SEEDS)
 
     # Number of features (i.e., dimension of a single sample)
@@ -50,15 +50,15 @@ if __name__ == "__main__":
         (0.75, 1.0),
         (0.9, 1.0),
     ]
-    EPS_SIM = 1e-4
+    EPS_SIM = 1e-2
 
     SAVE_NAME = (
         f"sharpness_f{N_FEATURES}_s{N_GAMMA_SAMPLES*N_SINGLE_MASK_SAMPLES}"
     )
 
     sim_fns = {
-        "exp_log_and": jit(sbdr.exp_log_and),
-        "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
+        "log_and": jit(sbdr.log_and),
+        # "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
     }
 
     MIs = {sim_name: [] for sim_name in sim_fns.keys()}

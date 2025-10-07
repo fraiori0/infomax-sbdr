@@ -230,6 +230,7 @@ class AntiHebbianModule(AntiHebbianBase):
             "y": y.astype(x.dtype),
             "z": z.astype(x.dtype),
         }
+    
 
 
 class AntiHebbianTimeConvModule(AntiHebbianBase):
@@ -272,6 +273,7 @@ class AntiHebbianTimeConvModule(AntiHebbianBase):
         z = np.logical_and(y, z)
 
         return x, y.astype(x.dtype), z.astype(x.dtype)
+
 
 
 """ -------------------- """

@@ -15,9 +15,16 @@ import plotly.graph_objects as go
 
 if __name__ == "__main__":
 
-    SIM_KEY = "logand"
-
     SAVE_NAME = "simbias_f256_s10000"
+    sim_names = {
+        "log_and": r"$g_{\epsilon}$",
+    }
+    fig_size={
+        "width": 800,
+        "height": 500
+    }
+
+    font_family = "Latin Modern Roman"
 
     data_folder = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -35,7 +42,7 @@ if __name__ == "__main__":
         os.pardir,
         os.pardir,
         "resources",
-        "figs",
+        "results",
         "infomax optimality",
         "simbias",
     )
@@ -54,23 +61,23 @@ if __name__ == "__main__":
     n_nonzero = data["n_nonzero"]
     gamma_concentration = data["gamma_concentration"]
     uniform_range = data["uniform_range"]
-    eps_cross = np.array(data["eps_cross"])
-    eps_self = np.array(data["eps_self"])
+    eps_sim = np.array(data["eps_sim"])
     seeds = data["seeds"]
 
     # plot
 
     fig = go.Figure()
 
-    f# select a single key
-    MIs = MIs[SIM_KEY]  # shape (n_nonzero, seeds, eps_self, eps_cross)
-        
-    for i, n_nz in enumerate(n_nonzero):
-        for j, e_slf in enumerate(eps_self):
-            mi = MIs[i, :, :, j]  # mi : shape (eps_cross, seeds)
+    marker_symbols = ["circle", "x", "triangle-up", "square", "diamond", "cross"]
+    line_styles = ["solid", "dash", "dot", "dashdot", "longdash"]
+
+    for k, sim_k in enumerate(sim_names):
+        for i, e_sim in enumerate(eps_sim):
+            
+            mi = MIs[sim_k][:, i, :]  # mi : shape (eps_cross, seeds)
     
-            hue = i / len(n_nonzero)
-            lightness = 0.5 + 0.25 * (j / len(eps_self))
+            hue = i / len(eps_sim)
+            lightness = 0.6 # + 0.25 * (j / len(eps_sim))
             saturation = 0.7
             color = generate_color(hue, lightness, saturation)
 
@@ -81,14 +88,14 @@ if __name__ == "__main__":
             # plot with error bars
             fig.add_trace(
                 go.Scatter(
-                    x=eps_cross,
+                    x=n_nonzero,
                     y=mi_mean,
                     error_y=dict(
                         type="data",
                         array=mi_std,
                     ),
                     mode="lines+markers",
-                    name=f"{n_nz} F - e {e_slf:.3f}",
+                    name=str(round(float(e_sim), 3)),
                     marker=dict(
                         color=color,
                         size=10,
@@ -97,23 +104,46 @@ if __name__ == "__main__":
                         width=2,
                         color=color,
                     ),
-                    legendgroup=f"{j} eps_self",
+                    legendgroup=str(sim_k),
                 )
             )
 
+    fig.update_xaxes(
+        title=dict(
+            text=r"Average number of non-zero units",
+            font=dict(size=20, family=font_family)),
+        tickfont=dict(size=18, family=font_family),
+    )
+
+    fig.update_yaxes(
+        title=dict(
+            text=r"Mutual Information (nats)",
+            font=dict(size=20, family=font_family)),
+        tickfont=dict(size=18, family=font_family),
+    )
+
     fig.update_layout(
-        xaxis_title="Epsilon Cross",
-        yaxis_title="Mutual Information (nats)",
-        width=800,
-        height=600,
-        legend_title="Average Non-zero Features",
-        font=dict(size=14),
+        **fig_size,
+        legend=dict(
+            title=r"ε", # awful, but plotly cuts the top if we use $\epsilon$
+            x = 1.1,
+            y = 1.0,
+            xanchor='left',
+            yanchor='top',
+            font=dict(size=18, family=font_family),
+            # title font size
+            title_font=dict(size=20, family=font_family),
+            # borderwidth=10,
+        ),
+        # font=dict(size=20, family=font_family),
         template="plotly_white",
     )
 
+    # set x axis to log scale
+    # fig.update_xaxes(type="log")
     # set y axis properties
     fig.update_yaxes(
-        range=[0.0, 6.0],  # MIs.max() + 0.5], #
+        # range=[0.0, 6.0],  # MIs.max() + 0.5], #
         # ticks every 0.5
         dtick=0.5,
     )
@@ -121,7 +151,10 @@ if __name__ == "__main__":
     fig.show()
 
     if SAVE:
-        fig.write_html(
-            os.path.join(save_folder, SAVE_NAME + ".html"),
-            include_plotlyjs="directory",
+        # export as svg
+        fig.write_image(
+            os.path.join(save_folder, SAVE_NAME + ".svg"),
+            format="svg",
+            **fig_size,
+            scale=3,
         )

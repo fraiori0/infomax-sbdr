@@ -28,8 +28,8 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    N_SEEDS = 10
-    SEEDS = 47 * np.arange(N_SEEDS)
+    N_SEEDS = 15
+    SEEDS = 50 * np.arange(N_SEEDS)
 
     # Number of features (i.e., dimension of a single sample)
     N_FEATURES = 256
@@ -46,7 +46,7 @@ if __name__ == "__main__":
     UNIFORM_RANGE = (0.9, 1.0)
 
     # Biases for the similarity function
-    EPS_SIM = [1e-5, 1e-4, 1e-3, 2*1e-3, 3*1e-3, 5*1e-3, 1e-2]
+    EPS_SIM = [1e-3, 1e-2, 2*1e-2, 5*1e-2, 1e-1, 1e0]
 
 
     # def logand_sim(x,y, eps):
@@ -57,8 +57,8 @@ if __name__ == "__main__":
     )
 
     sim_fns = {
-        "exp_log_and": jit(sbdr.exp_log_and),
-        "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
+        "log_and": jit(sbdr.log_and),
+        # "exp_log_and_delta": jit(sbdr.exp_log_and_delta),
     }
 
     MIs = {sim_name: [] for sim_name in sim_fns.keys()}

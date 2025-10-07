@@ -76,7 +76,7 @@ k_types_and_subtitles = (
 )
 
 # path to the file with stored result for accuracy, computing them evrytime takes a lot of time
-result_path = os.path.join(
+accuracy_results_path = os.path.join(
     base_folder,
     "resources",
     "results",
@@ -338,10 +338,10 @@ def keep_top_k(x, k):
         return jax.vmap(partial(keep_top_k_single, k=k))(x)
 
 # first, check if a file with the stored results is already present
-if os.path.exists(result_path):
+if os.path.exists(accuracy_results_path):
     
-    print(f"Loading results from {result_path}")
-    with open(result_path, "r") as f:
+    print(f"Loading results from {accuracy_results_path}")
+    with open(accuracy_results_path, "r") as f:
         accuracy_results = yaml.safe_load(f)
 
     # Add it to the models dict
