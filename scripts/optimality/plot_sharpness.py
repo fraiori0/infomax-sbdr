@@ -9,11 +9,15 @@ from functools import partial
 from sampling_fn import *
 import json
 import plotly.graph_objects as go
+import plotly.io as pio
 
 # Online tool to visualize the pdf of the Beta distribution
 # https://www.acsu.buffalo.edu/~adamcunn/probability/beta.html
 
 if __name__ == "__main__":
+
+    # set plotly render output to browser
+    pio.renderers.default = "browser"
 
     SAVE_NAME = "sharpness_f256_s10000"
 
