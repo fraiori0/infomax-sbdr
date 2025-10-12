@@ -2,8 +2,8 @@ import os
 import argparse
 
 
-default_model = "standard"
-default_number = "4"
+default_model = "xor"
+default_number = "2"
 
 default_cuda = "0"
 

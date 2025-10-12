@@ -7,7 +7,8 @@ import infomax_sbdr.binary_comparisons as bc
 from torch import nn as torch_nn
 import infomax_sbdr.classifier_modules as classifier_modules
 import infomax_sbdr.antihebbian_modules as ah
-import infomax_sbdr.recurrent_antihebbian_modules as rec_ah
+import infomax_sbdr.antihebbian_recurrent_modules as rec_ah
+import infomax_sbdr.antihebbian_xor_modules as xor_ah
 
 
 """
@@ -62,6 +63,7 @@ config_module_dict = {
 config_ah_module_dict = {
     "AntiHebbianModule": ah.AntiHebbianModule,
     "AntiHebbianRecurrentModule": rec_ah.AntiHebbianRecurrentModule,
+    "AntiHebbianXORModule": xor_ah.AntiHebbianXORModule
 }
 
 

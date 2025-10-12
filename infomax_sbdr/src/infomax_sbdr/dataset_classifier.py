@@ -1,12 +1,7 @@
-import os
 import numpy as onp
-import jax.numpy as np
 from torch.utils.data import Dataset
-import pickle
-from typing import Callable, Sequence
+from typing import Callable
 import torch
-from torchvision import tv_tensors
-
 
 class ClassifierDataset(Dataset):
     def __init__(

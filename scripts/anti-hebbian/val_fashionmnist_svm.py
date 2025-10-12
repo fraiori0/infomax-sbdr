@@ -40,10 +40,10 @@ BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "standard" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "4"
+default_model = "xor" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 20  # 102
+default_step = 30  # 102
 
 # base folder
 base_folder = os.path.join(

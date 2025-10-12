@@ -10,6 +10,8 @@ import numpy as onp
 Check here https://stats.stackexchange.com/questions/48506/what-function-could-be-a-kernel
 """
 
+"""Jaccard similairty is not strictly a kernel, but log(AND) can be used to define a Bregman divergence"""
+
 
 np.set_printoptions(precision=4, suppress=True)
 

@@ -11,3 +11,4 @@ from infomax_sbdr.dataset_cifar100 import *
 from infomax_sbdr.torch2jaxdataloader import *
 from infomax_sbdr.predefined_modules import *
 from infomax_sbdr.dataset_classifier import *
+from infomax_sbdr.dataset_xor import *

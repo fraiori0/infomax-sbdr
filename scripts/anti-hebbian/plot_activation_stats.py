@@ -18,11 +18,14 @@ pio.renderers.default = "browser"
 
 
 models = {
-    "standard": {
-        "3": {"name": r"$p_* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
-        "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
-        "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
-        "4": {"name": r"$p_* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
+    # "standard": {
+    #     "3": {"name": r"$p_* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
+    #     "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
+    #     "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
+    #     "4": {"name": r"$p_* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
+    # },
+    "xor": {
+        "1": {"name": r"$p_* = 0.075$", "chkp": 30, "color": "#d62728", "dash": "dash", "symbol": "x"},
     },
 }
 
@@ -245,7 +248,7 @@ fig.write_image(
     scale=3,
 )
 
-exit()
+# exit()
 
 """---------------------"""
 """ Classification accuracy with varying level of sparsification """
