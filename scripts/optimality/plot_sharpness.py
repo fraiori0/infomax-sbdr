@@ -11,6 +11,8 @@ import json
 import plotly.graph_objects as go
 import plotly.io as pio
 
+# ε
+
 # Online tool to visualize the pdf of the Beta distribution
 # https://www.acsu.buffalo.edu/~adamcunn/probability/beta.html
 
@@ -61,12 +63,13 @@ if __name__ == "__main__":
 
     MIs = data["MI"]
     for k in MIs.keys():
-        # MI shape - (n_nonzero, gamma_concentration, seeds)
+        # MI shape - (n_nonzero, gamma_concentration, seeds, eps_sim)
         MIs[k] = np.array(MIs[k])
     n_nonzero = data["n_nonzero"]
     gamma_concentration = data["gamma_concentration"]
     uniform_range = np.array(data["uniform_range"])
     seeds = data["seeds"]
+    eps_sim = np.array(data["eps_sim"])
 
     # plot
 
@@ -77,42 +80,43 @@ if __name__ == "__main__":
 
     for k, sim_k in enumerate(sim_names):
         for i, u_range in enumerate(uniform_range):
-            # select a single concentration
-            mi = MIs[sim_k][:, i, :]  # shape (n_nonzero, seeds)
-    
-            hue = i / len(uniform_range)
-            lightness = 0.6
-            saturation = 0.7
-            color = generate_color(hue, lightness, saturation)
+            for j, e_sim in enumerate(eps_sim):
+                # select a single concentration
+                mi = MIs[sim_k][:, i, :, j]  # shape (n_nonzero, seeds)
+        
+                hue = i / len(uniform_range)
+                lightness = 0.6
+                saturation = 0.7
+                color = generate_color(hue, lightness, saturation)
 
-            # compute std for each gamma_concentration
-            mi_mean = mi.mean(axis=-1)
-            mi_std = mi.std(axis=-1)
+                # compute std for each gamma_concentration
+                mi_mean = mi.mean(axis=-1)
+                mi_std = mi.std(axis=-1)
 
-            # plot with error bars
-            fig.add_trace(
-                go.Scatter(
-                    x=n_nonzero,
-                    y=mi_mean,
-                    error_y=dict(
-                        type="data",
-                        array=mi_std,
-                    ),
-                    mode="lines+markers",
-                    name=str(round(float(u_range[0]), 3)),
-                    marker=dict(
-                        color=color,
-                        size=10,
-                        symbol=marker_symbols[k],
-                    ),
-                    line=dict(
-                        width=2,
-                        color=color,
-                        dash=line_styles[k],
-                    ),
-                    legendgroup=f"{sim_k}"
+                # plot with error bars
+                fig.add_trace(
+                    go.Scatter(
+                        x=n_nonzero,
+                        y=mi_mean,
+                        error_y=dict(
+                            type="data",
+                            array=mi_std,
+                        ),
+                        mode="lines+markers",
+                        name=str(round(float(u_range[0]), 3)),
+                        marker=dict(
+                            color=color,
+                            size=10,
+                            symbol=marker_symbols[j],
+                        ),
+                        line=dict(
+                            width=2,
+                            color=color,
+                            dash=line_styles[j],
+                        ),
+                        legendgroup=f"{sim_k}"
+                    )
                 )
-            )
 
     fig.update_xaxes(
         title=dict(

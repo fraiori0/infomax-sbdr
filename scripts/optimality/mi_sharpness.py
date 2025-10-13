@@ -50,7 +50,7 @@ if __name__ == "__main__":
         (0.75, 1.0),
         (0.9, 1.0),
     ]
-    EPS_SIM = 1e-2
+    EPS_SIM = [1e-2, 5e-2]
 
     SAVE_NAME = (
         f"sharpness_f{N_FEATURES}_s{N_GAMMA_SAMPLES*N_SINGLE_MASK_SAMPLES}"
@@ -85,6 +85,9 @@ if __name__ == "__main__":
                 print(f"  uniform_range: {uniform_range}")
 
             for seed in tqdm(SEEDS, leave=False, disable=disable_tqdm):
+
+                for k in MIs.keys():
+                    MIs[k][-1][-1].append([])
 
                 if verbose:
                     print(f"\tseed: {seed}")
@@ -134,22 +137,23 @@ if __name__ == "__main__":
 
                 for sim_name, sim_fn in sim_fns.items():
                     # self-similarity
-                    p_ii = sim_fn(zs, zs, eps=EPS_SIM)
-                    # cross-similarity
-                    p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...], eps=EPS_SIM)
+                    for eps_sim in EPS_SIM:
+                        p_ii = sim_fn(zs, zs, eps=eps_sim)
+                        # cross-similarity
+                        p_ij = sim_fn(zs[:, None, ...], zs[None, :, ...], eps=eps_sim)
 
-                    # check for nans in p_ij
-                    # if np.any(np.isnan(p_ij)):
-                    #     raise ValueError("p_ij has nan")
+                        # check for nans in p_ij
+                        # if np.any(np.isnan(p_ij)):
+                        #     raise ValueError("p_ij has nan")
 
-                    # Compute InfoNCE k-sample estimator
-                    pmis = np.log(p_ii / (p_ij.mean(axis=-1) + 1e-6) + 1e-6)
-                    # if np.any(np.isnan(pmis)):
-                    #     raise ValueError("pmis has nan")
+                        # Compute InfoNCE k-sample estimator
+                        pmis = np.log(p_ii / (p_ij.mean(axis=-1) + 1e-6) + 1e-6)
+                        # if np.any(np.isnan(pmis)):
+                        #     raise ValueError("pmis has nan")
 
-                    mi = pmis.mean(axis=-1)
+                        mi = pmis.mean(axis=-1)
 
-                    MIs[sim_name][-1][-1].append(mi.item())
+                        MIs[sim_name][-1][-1][-1].append(mi.item())
 
     for sim_name in sim_fns.keys():
         print(f"MIs.shape: {np.array(MIs[sim_name]).shape}")
