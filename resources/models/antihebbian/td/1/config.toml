@@ -32,7 +32,7 @@ hue = 0.15
 
 [training]
 epochs = 100
-batch_size = 128
+batch_size = 32
 learning_rate = 0.003
 
 [training.checkpoint]

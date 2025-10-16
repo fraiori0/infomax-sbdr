@@ -318,43 +318,46 @@ def get_shapes(nested_dict):
 pprint(get_shapes(variables))
 
 
-exit()
 """---------------------"""
 """ Forward Pass """
 """---------------------"""
 
-print("\nForward pass jitted")
+print("\nForward scan jitted")
 
 
-def forward_scan(variables, xs, z0, key):
+def forward_scan(variables, xs_seq, key):
+    u0, v0, y_p0 = model.generate_initial_state(key, xs_seq[..., 0, :])
     return model.apply(
         variables,
-        xs,
-        z0,
-        key,
+        xs_seq,
+        u0,
+        v0,
+        y_p0,
+        # key,
         method=model.forward_scan,
     )
 
 
-def forward_scan_eval(variables, xs, z0, key):
+def forward_scan_eval(variables, xs_seq, key):
+    u0, v0, y_p0 = model_eval.generate_initial_state(key, xs_seq[..., 0, :])
     return model_eval.apply(
         variables,
-        xs,
-        z0,
-        key, 
-        method=model.forward_scan,
+        xs_seq,
+        u0,
+        v0,
+        y_p0,
+        # key,
+        method=model_eval.forward_scan,
     )
-
 forward_jitted = jit(forward_scan)
 forward_eval_jitted = jit(forward_scan_eval)
 
-# test the forward pass
+# test the forward scan
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
-z0 = model.generate_initial_state(key, xs[..., 0, :], **model_config["model"]["initial_state"]["kwargs"])
 
-outs = forward_jitted(variables, xs, z0, key)
-_ = forward_eval_jitted(variables, xs, z0, key)
+outs = forward_jitted(variables, xs, key)
+_ = forward_eval_jitted(variables, xs, key)
 
 print(f"\tInput shape: {xs.shape}")
 print(f"\tOutput shapes:")
@@ -383,14 +386,16 @@ update_params_jitted = jit(update_params)
 
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
-z0 = model.generate_initial_state(key, xs[..., 0, :], **model_config["model"]["initial_state"]["kwargs"])
 
-outs = forward_jitted(variables, xs, z0, key)
+outs = forward_jitted(variables, xs, key)
 
-tmp_params, tmp_d_params = update_params(variables, **outs, lr = 0.01, momentum = 0.9)
+tmp_params, tmp_d_params = update_params_jitted(variables, outs=outs, lr = 0.01, momentum = 0.9)
 
 print(f"\tShape of parameter updates:")
 pprint(get_shapes(tmp_d_params))
+
+# pprint(jax.tree.map(lambda x: np.any(np.isnan(x)), tmp_d_params))
+# pprint(jax.tree.map(lambda x: np.any(np.isclose(x, 0)), tmp_d_params))
 
 
 """---------------------"""
@@ -454,12 +459,18 @@ def compute_metrics(outs):
     s_avg = np.mean(outs["z"].reshape((-1, outs["z"].shape[-1])), axis=-1)
     qs_s_val = np.quantile(s_avg, QS)
 
+    # compute average td error
+    td_err = outs["td_pred_err_prev"].mean()
+
     metrics = {
         f"unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)
     }
     metrics.update(
         {f"sample/{k}": v for k, v in zip(Q_KEYS, qs_s_val)}
     )
+
+    metrics["td_err"] = td_err
+
     return metrics
 
 
@@ -468,16 +479,15 @@ def train_step(state, batch):
     outs = forward_jitted(
         state["variables"],
         batch["x"],
-        batch["z0"],
         batch["key"],
     )
 
     # remove the first steps
-    outs = jax.tree.map(lambda x: x[..., model_config["model"]["initial_state"]["skip_first"]:, :], outs)
+    outs = jax.tree.map(lambda x: x[..., model_config["model"]["seq"]["skip_first"]:, :], outs)
 
     params, d_params = update_params_jitted(
         state["variables"],
-        **outs,
+        outs=outs,
         lr=model_config["training"]["learning_rate"],
         momentum=model_config["model"]["kwargs"]["momentum"],
     )
@@ -500,7 +510,6 @@ def eval_step(state, batch):
     outs = forward_eval_jitted(
             state["variables"],
             batch["x"],
-            batch["z0"],
             batch["key"],
         )
 
@@ -516,11 +525,8 @@ xs, labels = next(iter(dataloader_train))
 # xs_1 = jax.device_put(xs_1)
 # xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
-key, _ = jax.random.split(key)
-z0 = model.generate_initial_state(key, xs[..., 0, :], **model_config["model"]["initial_state"]["kwargs"])
 batch = {
     "x": xs,
-    "z0": z0,
     "key": key,
 }
 
@@ -530,6 +536,7 @@ metrics_val = eval_step(state, batch)
 print(f"\tMetrics:")
 pprint(metrics)
 
+# exit()
 """------------------"""
 """ Logging Utils """
 """------------------"""
@@ -574,11 +581,9 @@ try:
             enumerate(dataloader_train), leave=False, total=len(dataloader_train)
         ):
 
-            key, key_z0 = jax.random.split(key)
-            z0 = model.generate_initial_state(key_z0, xs[..., 0, :], **model_config["model"]["initial_state"]["kwargs"])
+            key, _ = jax.random.split(key)
             batch = {
                 "x": xs,
-                "z0": z0,
                 "key": key,
             }
             state, metrics = train_step(state, batch)
@@ -594,10 +599,9 @@ try:
             # test on validation set
             if batch_idx % model_config["validation"]["eval_interval"] == 0:
                 xs_val, labels_val = next(iter(dataloader_val))
-                key_val, key_z0_val = jax.random.split(jax.random.key(batch_idx))
+                key_val, _ = jax.random.split(jax.random.key(batch_idx))
                 batch_val = {
                     "x": xs_val,
-                    "z0": model.generate_initial_state(key_z0_val, xs_val[..., 0, :], **model_config["model"]["initial_state"]["kwargs"]),
                     "key": key_val,
                 }
                 metrics_val = eval_step(state, batch_val)
@@ -637,8 +641,7 @@ try:
         # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
         xs_original, labels_original = next(iter(dataloader_original))
         key_val = jax.random.key(epoch_step)
-        z0 = model.generate_initial_state(key_val, xs_original[..., 0, :], **model_config["model"]["initial_state"]["kwargs"])
-        outs = forward_eval_jitted(state["variables"], xs_original, z0, key_val)
+        outs = forward_eval_jitted(state["variables"], xs_original, key_val)
         # convert to images
         activation_imgs = activation_seq_to_img(outs["z"])
         for i in range(activation_imgs.shape[0]):

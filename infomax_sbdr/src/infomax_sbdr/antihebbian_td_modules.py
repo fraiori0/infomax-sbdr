@@ -119,7 +119,7 @@ class CentroidTDBase(nn.Module):
         Returns:
             dw_f: Dictionary with kernel and bias updates
         """
-        kernel = params["params"]["w_f"]["kernel"]  # (input_features, n_features)
+        kernel = params["params"]["w_f_kernel"]  # (input_features, n_features)
         mu = params["params"]["mu"]  # (n_features, n_features)
         mu_self = np.diag(mu)  # (n_features,)
 
@@ -132,7 +132,7 @@ class CentroidTDBase(nn.Module):
         # We want: (x[..., :, None] - kernel) * z[..., None, :]
         # Result: (*batch, input_features, n_features)
         xi_minus_wfi = x[..., :, None] - kernel
-        self_activity_scale = (self.p_target**2 - mu_self**2)
+        self_activity_scale = (self.p_target - mu_self)
         self_activity_term = self_activity_scale * xi_minus_wfi * z[..., None, :]
         
         # Decorrelation term: push/pull centroids apart based on co-activation
@@ -154,7 +154,7 @@ class CentroidTDBase(nn.Module):
         # We multiply along the last two dims and sum over the last dim
         decorr_weight = decorr_scale * zi_zj  # (*batch, n_features, n_features)
         # Now multiply with wfi_minus_wfj and sum over j (last axis)
-        decorr_term = (wfi_minus_wfj * decorr_weight[..., None, :, :]).sum(axis=-1)
+        decorr_term = (wfi_minus_wfj * decorr_weight[..., None, :, :]).mean(axis=-1)
         # Result: (*batch, input_features, n_features)
         
         # Combine both terms
@@ -187,7 +187,7 @@ class CentroidTDBase(nn.Module):
         Returns:
             dw_p: Dictionary with kernel and bias updates
         """
-        kernel = params["params"]["w_p"]["kernel"]  # (n_features, n_features)
+        kernel = params["params"]["w_p_kernel"]  # (n_features, n_features)
         mu = params["params"]["mu"]
         mu_self = np.diag(mu)
 
@@ -230,14 +230,10 @@ class CentroidTDBase(nn.Module):
         dparams = {
             "params": {
                 "mu": None,
-                "w_f": {
-                    "kernel": None,
-                    "bias": None,
-                },
-                "w_p": {
-                    "kernel": None,
-                    "bias": None,
-                },
+                "w_f_kernel": None,
+                "w_f_bias": None,
+                "w_p_kernel": None,
+                "w_p_bias": None,
             }
         }
         
@@ -264,10 +260,10 @@ class CentroidTDBase(nn.Module):
         
         # Store all updates
         dparams["params"]["mu"] = dmu
-        dparams["params"]["w_f"]["kernel"] = dw_f["kernel"]
-        dparams["params"]["w_f"]["bias"] = dw_f["bias"]
-        dparams["params"]["w_p"]["kernel"] = dw_p["kernel"]
-        dparams["params"]["w_p"]["bias"] = dw_p["bias"]
+        dparams["params"]["w_f_kernel"] = dw_f["kernel"]
+        dparams["params"]["w_f_bias"] = dw_f["bias"]
+        dparams["params"]["w_p_kernel"] = dw_p["kernel"]
+        dparams["params"]["w_p_bias"] = dw_p["bias"]
         
         return dparams
     
@@ -287,19 +283,19 @@ class CentroidTDBase(nn.Module):
         params["params"]["mu"] = params["params"]["mu"] + dparams["params"]["mu"]
         
         # Update forward weights
-        params["params"]["w_f"]["kernel"] = (
-            params["params"]["w_f"]["kernel"] + lr * dparams["params"]["w_f"]["kernel"]
+        params["params"]["w_f_kernel"] = (
+            params["params"]["w_f_kernel"] + lr * dparams["params"]["w_f_kernel"]
         )
-        params["params"]["w_f"]["bias"] = (
-            params["params"]["w_f"]["bias"] + lr * dparams["params"]["w_f"]["bias"]
+        params["params"]["w_f_bias"] = (
+            params["params"]["w_f_bias"] + lr * dparams["params"]["w_f_bias"]
         )
         
         # Update prediction weights
-        params["params"]["w_p"]["kernel"] = (
-            params["params"]["w_p"]["kernel"] + lr * dparams["params"]["w_p"]["kernel"]
+        params["params"]["w_p_kernel"] = (
+            params["params"]["w_p_kernel"] + lr * dparams["params"]["w_p_kernel"]
         )
-        params["params"]["w_p"]["bias"] = (
-            params["params"]["w_p"]["bias"] + lr * dparams["params"]["w_p"]["bias"]
+        params["params"]["w_p_bias"] = (
+            params["params"]["w_p_bias"] + lr * dparams["params"]["w_p_bias"]
         )
         
         return params
@@ -350,14 +346,10 @@ class CentroidTDModule(CentroidTDBase):
         Returns:
             Dictionary with all activations and values
         """
-        print("\n\nEEE")
-        print(self.w_p.variables.keys())
-        print("\n\nEEE")
 
-        self.param()
         # Forward activation: activate if within distance threshold
-        kernel_f = self.get_variable('params', 'w_f''kernel')  # (input_features, n_features)
-        bias_f = self.get_variable('params', 'w_f', 'bias')  # (n_features,)
+        kernel_f = self.kernel_f # (input_features, n_features)
+        bias_f = self.bias_f  # (n_features,)
         
         # Compute distances from input to each centroid
         # kernel columns are centroids: we want ||x - w_f_i|| for each i
@@ -372,17 +364,17 @@ class CentroidTDModule(CentroidTDBase):
 
         # TD-based prediction for next time-step based on past discounted sum
         # # v_t = W_p^T u_t        
-        kernel_p = self.w_p.variables["kernel"]  # (n_features, n_features)
-        bias_p = self.w_p.variables["bias"]  # (n_features,)
+        kernel_p = self.kernel_p # (n_features, n_features)
+        bias_p = self.bias_p  # (n_features,)
         # u: (*batch, n_features), kernel_p: (n_features[in], n_features[out])
         v = (u[..., None] * kernel_p).sum(axis=-2)  # (*batch, n_features[out])
         
         # TD prediction for next time step
         y_p_next = v_prev - self.gamma * v
-        y_p_next = y_p_next > bias_p  # Threshold for binary activation
+        y_p_next = y_p_next + bias_p > 0  # Threshold for binary activation
         
         # Compute TD error for v_prev, computed on u_prev
-        td_pred_err_prev = y_p_prev - z.astype(x.dtype)
+        td_pred_err_prev = z.astype(x.dtype) - y_p_prev.astype(x.dtype)
         
         return {
             # input/output for current time step
@@ -461,10 +453,10 @@ class CentroidTDModule(CentroidTDBase):
         # with a probability of self.p_target
         u0 = np.ones(state_shape) * self.p_target/(1.0 - self.gamma)
         
-        # Initialize v in the same way
-        v0 = u0.copy()
+        # Initialize v to zeros
+        v0 = np.zeros(state_shape)
 
-        # Initialize y_p0 to all 1, considering this will be a AND with the input activation
-        y_p0 = np.ones(state_shape)
+        # Initialize y_p0 to a bernoulli
+        y_p0 = jax.random.bernoulli(key, p=2*self.p_target, shape=state_shape).astype(x.dtype)
         
         return u0, v0, y_p0

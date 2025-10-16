@@ -114,7 +114,7 @@ if __name__ == "__main__":
                             color=color,
                             dash=line_styles[j],
                         ),
-                        legendgroup=f"{sim_k}"
+                        legend=f"legend{j+1}",
                     )
                 )
 
@@ -134,17 +134,6 @@ if __name__ == "__main__":
 
     fig.update_layout(
         **fig_size,
-        legend=dict(
-            title=r"$a_{min}$",
-            x = 1.1,
-            y = 1.0,
-            xanchor='left',
-            yanchor='top',
-            font=dict(size=18, family=font_family),
-            # title font size
-            title_font=dict(size=20, family=font_family),
-            # borderwidth=10,
-        ),
         # font=dict(size=20, family=font_family),
         template="plotly_white",
     )
@@ -157,6 +146,25 @@ if __name__ == "__main__":
         # ticks every 0.5
         dtick=0.5,
     )
+
+    # Position the legends
+    # position the legend for this subplot
+    for i, e_sim in enumerate(eps_sim):
+        fig.update_layout(
+            **{f"legend{i+1}":
+               dict(
+                   x=1.1,
+                   y=1.0 - 0.6 * i,
+                   xanchor='left',
+                   yanchor='top',
+                   title=r"$a_{min} \; (\epsilon = " + str(e_sim) + ")$",
+                   font=dict(size=18, family=font_family),
+                    # title font size
+                    title_font=dict(size=20, family=font_family),
+            ),}
+        )
+        # # also set font for all legends
+        # fig.layout.annotations[i].font = dict(size=18, family="Times New Roman")
 
     fig.show()
 
