@@ -65,7 +65,7 @@ config_ah_module_dict = {
     "AntiHebbianModule": ah.AntiHebbianModule,
     "AntiHebbianRecurrentModule": rec_ah.AntiHebbianRecurrentModule,
     "AntiHebbianXORModule": xor_ah.AntiHebbianXORModule,
-    "CentroidTDModule": td_ah.CentroidTDModule,
+    "AntiHebbianTDModule": td_ah.AntiHebbianTDModule,
 }
 
 

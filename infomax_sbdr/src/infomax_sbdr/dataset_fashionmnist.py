@@ -131,3 +131,97 @@ class FashionMNISTDatasetContrastive(FashionMNISTDataset):
             img_2 = img_2.view(-1)
 
         return (img_1, img_2), label
+    
+
+class FashionMNISTPoissonDataset(Dataset):
+    # NOTE: a transform is applied AFTER the Poisson generation, i.e., to the sequences of binary $\in {0,1}$ values
+    """ Dataset for FashionMNIST that generate binary sequences using Poisson firing rate"""
+    def __init__(
+        self,
+        folder_path: str,
+        kind: str = "train",  # 'train' or 'test'
+        num_steps=100,
+        max_rate=0.5,
+        transform: Callable = None,
+        flatten: bool = False,
+        device = None,
+    ) -> None:
+    
+        super().__init__()
+
+        if kind not in ["train", "test"]:
+            raise ValueError("kind must be 'train' or 'test'")
+
+        self.folder_path = folder_path
+        self.num_steps = num_steps
+        self.max_rate = max_rate
+        self.transform = transform
+        self.flatten = flatten
+        self.device = device
+
+        # adjust the 'kind' string to match the file names for the FashionMNIST
+        if kind == "test":
+            kind = "t10k"
+
+        # Load images and labels
+        labels_path = os.path.join(self.folder_path, f"{kind}-labels-idx1-ubyte.gz")
+        images_path = os.path.join(self.folder_path, f"{kind}-images-idx3-ubyte.gz")
+        with gzip.open(labels_path, "rb") as lbpath:
+            self.labels = onp.frombuffer(lbpath.read(), dtype=onp.uint8, offset=8)
+
+        with gzip.open(images_path, "rb") as imgpath:
+            self.images = onp.frombuffer(imgpath.read(), dtype=onp.uint8, offset=16)
+            # (N, C, H, W) format
+            self.images = self.images.reshape(len(self.labels), 1, 28, 28)
+        
+        # Perform one-hot encoding of the labels
+        self.labels = onp.eye(10)[self.labels]
+
+        # convert to torchvision image
+        self.images = tv_tensors.Image(self.images)
+        # and to torch array for the labels
+        self.labels = torch.from_numpy(self.labels)
+
+        # convert to float and divide by 255
+        self.images = self.images.float() / 255
+
+         # # print the mean and std for each channel
+        print(f"FashionMNIST Dataset Loaded ({kind})")
+        print(f"\tChannel Mean: {self.images.mean(dim=(0, 2, 3))}")
+        print(f"\tChannel Std: {self.images.std(dim=(0, 2, 3))}")
+
+        # Move to the specific device, if specified
+        if device is not None:
+            self.images = self.images.to(device)
+            self.labels = self.labels.to(device)
+
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+
+        img = self.images[idx]
+        label = self.labels[idx]
+
+        img = self._img_to_poisson(img)
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.flatten:
+            img = img.view(-1, 28*28)
+
+        return img, label
+    
+    def _img_to_poisson(self, img):
+        rates = img * self.max_rate
+
+        # generate binary sequences using Poisson process
+        rand_vals = torch.rand(
+            self.num_steps, *img.shape,
+        )
+
+        binary_seq = rand_vals < rates
+
+        return binary_seq

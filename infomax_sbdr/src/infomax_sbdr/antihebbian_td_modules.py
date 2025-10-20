@@ -4,7 +4,7 @@ import flax.linen as nn
 from typing import Dict, Any
 
 
-class CentroidTDBase(nn.Module):
+class AntiHebbianTDBase(nn.Module):
     """
     Base class for a Recurrent Centroid-based layer with Temporal Difference learning.
     
@@ -26,46 +26,41 @@ class CentroidTDBase(nn.Module):
     init_variance_w_prediction: float = 1.0
     
     def setup(self):
-        # Forward weights as centroids - using Dense layer for consistency
-        # The kernel will be transposed: Dense uses (input_features, output_features)
-        # We'll interpret each column as a centroid in input space
-        # Forward weights (centroids)
-        self.kernel_f = self.param(
-            'w_f_kernel',
-            nn.initializers.variance_scaling(
+        # weights learning a TD prediction of the (binary) input
+        self.w_td = nn.Dense(
+            features=self.n_input_features,
+            kernel_init=nn.initializers.variance_scaling(
                 scale=self.init_variance_w_forward,
                 mode="fan_in",
                 distribution="truncated_normal",
             ),
-            (self.n_input_features, self.n_features),  # (input_features, n_features)
+            use_bias=False
         )
-        
-        self.bias_f = self.param(
-            'w_f_bias',
-            nn.initializers.constant(0.5 * np.sqrt(self.n_input_features)),
-            (self.n_features,),
-        )
-    
-        # Prediction weights
-        self.kernel_p = self.param(
-            'w_p_kernel',
-            nn.initializers.variance_scaling(
-                scale=self.init_variance_w_prediction,
+        # forward weights
+        self.w_f = nn.Dense(
+            features=self.n_features,
+            kernel_init=nn.initializers.variance_scaling( # AAAA
+                scale=self.init_variance_w_forward,
                 mode="fan_in",
                 distribution="truncated_normal",
             ),
-            (self.n_features, self.n_features),
+            bias_init=nn.initializers.constant(0.0),
+        )
+        # lateral weights
+        self.w_l = nn.Dense(
+            features=self.n_features,
+            # kernel_init=nn.initializers.variance_scaling(
+            #     scale=self.init_variance_w_lateral,
+            #     mode="fan_in",
+            #     distribution="truncated_normal",
+            # ),
+            kernel_init=nn.initializers.constant(0.0),
+            use_bias=False,
+            # bias_init=nn.initializers.constant(self.bias_init_value),
         )
         
-        self.bias_p = self.param(
-            'w_p_bias',
-            nn.initializers.constant(0.0),
-            (self.n_features,),
-        )
-        # running exponential-weihgted mean that tracks (co)activation of units
-        # note, the diagonal is simply the running mean of the activation of a single unit,
-        # because the activity is either 0 or 1 (so it's not affected by multiplication with itself)
-        # mu0 = 0.0
+        
+        # exponential-weighted moving average that tracks (co)activation of units
         mu0 = np.ones((self.n_features, self.n_features)) * self.p_target**2 + np.eye(
             self.n_features
         ) * (self.p_target - self.p_target**2)
@@ -106,12 +101,8 @@ class CentroidTDBase(nn.Module):
     
     def compute_dw_f(self, params, outs):
         """
-        Compute updates for forward (centroid) weights.
-        
-        Combines two objectives:
-        1. Self-activity: Move centroids toward/away from inputs based on activity level
-        2. Decorrelation: Push/pull centroids apart based on co-activation statistics
-        
+        Compute updates for forward weights.
+
         Args:
             params: Current parameters
             outs: A dictionary, as returned by a forward pass or forward scan
@@ -119,51 +110,20 @@ class CentroidTDBase(nn.Module):
         Returns:
             dw_f: Dictionary with kernel and bias updates
         """
-        kernel = params["params"]["w_f_kernel"]  # (input_features, n_features)
+        kernel = params["params"]["w_f"]["kernel"]  # (input_features, n_features)
         mu = params["params"]["mu"]  # (n_features, n_features)
         mu_self = np.diag(mu)  # (n_features,)
 
         z = outs["z"]  # (*batch, n_features)
         x = outs["x"]  # (*batch, input_features)
         
-        # Self-activity term: move centroids based on activity level
-        # (x - kernel) gives direction from centroid to input
-        # Shape: x is (*batch, input_features), kernel is (input_features, n_features)
-        # We want: (x[..., :, None] - kernel) * z[..., None, :]
-        # Result: (*batch, input_features, n_features)
-        xi_minus_wfi = x[..., :, None] - kernel
-        self_activity_scale = (self.p_target - mu_self)
-        self_activity_term = self_activity_scale * xi_minus_wfi * z[..., None, :]
-        
-        # Decorrelation term: push/pull centroids apart based on co-activation
-        # For each pair of units (i, j), push W_f_i away from W_f_j if mu_ij > p_target^2
-        # and if both units are active
-        # Co-activation mask: (*batch, n_features, n_features)
-        zi_zj = z[..., :, None] * z[..., None, :]
-        # Compute pairwise centroid differences for all pairs
-        # kernel[:, i] - kernel[:, j] for all i, j
-        # Using broadcasting: kernel[:, :, None] - kernel[:, None, :]
-        # Shape: (input_features, n_features, n_features)
-        wfi_minus_wfj = kernel[:, :, None] - kernel[:, None, :]
-        # Scale by (p_target^2 - mu_ij) and co-activation
-        decorr_scale = (self.p_target**2 - mu)  # (n_features, n_features)
-        # We want to sum over j: sum_j [(p_target^2 - mu_ij) * (W_f_i - W_f_j) * z_i * z_j]
-        # Result should be (*batch, input_features, n_features)
-        # decorr_scale * zi_zj: (*batch, n_features, n_features)
-        # wfi_minus_wfj: (input_features, n_features, n_features)
-        # We multiply along the last two dims and sum over the last dim
-        decorr_weight = decorr_scale * zi_zj  # (*batch, n_features, n_features)
-        # Now multiply with wfi_minus_wfj and sum over j (last axis)
-        decorr_term = (wfi_minus_wfj * decorr_weight[..., None, :, :]).mean(axis=-1)
-        # Result: (*batch, input_features, n_features)
-        
-        # Combine both terms
-        dkernel = self_activity_term + decorr_term
-        
-        # Average over batch dimensions
+        # pulls kernel toward input if unit is active
+        xi_zj = (x[..., :, None] - kernel) * z[..., None, :]
+        # proportionally to the difference between the target and the actual co-activation
+        dkernel = (self.p_target**2 - mu_self**2) * xi_zj
+        # mean on all batch dimensions
         dkernel = dkernel.reshape(-1, *kernel.shape).mean(axis=0)
-        
-        # Bias update: increase radius if under-active
+        # adjust bias to get an overall activity of p_target
         dbias = self.p_target - mu_self
         
         return {
@@ -171,44 +131,67 @@ class CentroidTDBase(nn.Module):
             "bias": dbias,
         }
     
-    def compute_dw_p(self, params, outs):
+    def compute_dw_td(self, params, outs):
         """
         Compute updates for prediction weights using TD learning.
-        
-        The prediction weights learn to approximate the value function:
-        v_t = W_p^T u_t
-        
-        Updated using TD error: delta = v_{t-1} - (z_t + gamma * v_t)
         
         Args:
             params: Current parameters
             outs: A dictionary, as returned by a forward pass or forward scan
         
         Returns:
-            dw_p: Dictionary with kernel and bias updates
+            dw_td: Dictionary with kernel and bias updates
         """
-        kernel = params["params"]["w_p_kernel"]  # (n_features, n_features)
-        mu = params["params"]["mu"]
-        mu_self = np.diag(mu)
+        kernel = params["params"]["w_td"]["kernel"]  # (n_features, n_features)
 
         u_prev = outs["u_prev"]  # (*batch, n_features)
-        td_pred_err_prev = outs["td_pred_err_prev"]  # (*batch, n_features)
+        td_err_prev = outs["td_err_prev"]  # (*batch, n_features)
         
         # Standard TD update: delta * u
         # u: (*batch, n_features), td_pred_err: (*batch, n_features)
         # We want: u[..., :, None] * td_pred_err[..., None, :]
         # Result: (*batch, n_features, n_features)
-        ui_deltaj = u_prev[..., :, None] * td_pred_err_prev[..., None, :]
+        ui_deltaj = u_prev[..., :, None] * td_err_prev[..., None, :]
         
         # Average over batch dimensions
         dkernel = ui_deltaj.reshape(-1, *kernel.shape).mean(axis=0)
         
-        # Bias update: adjust threshold based on activity level
-        dbias = self.p_target - mu_self
-        
         return {
             "kernel": dkernel,
-            "bias": dbias,
+            # NOTE: there is no bias in the prediction weights
+        }
+    
+    def compute_dw_l(self, params, outs):
+        """
+        Compute updates for lateral weights.
+        
+        Args:
+            params: Current parameters
+            outs: A dictionary, as returned by a forward pass or forward scan
+        
+        Returns:
+            dw_l: Dictionary with kernel and bias updates
+        """
+
+        mu = params["params"]["mu"]
+        # mu_self = np.diag(params["params"]["mu"])
+
+        kernel = params["params"]["w_l"]["kernel"]
+
+        z = outs["z"]
+
+        # matrix of co-active units, used to mask the updates
+        # i.e., we update only weights between co-actived units
+        zi_zj = z[..., :, None] * z[..., None, :]
+        # proportionally to the difference between the target and the actual co-activation
+        dkernel = (self.p_target**2 - mu) * zi_zj
+        # mean on all batch dimensions
+        dkernel = dkernel.reshape(-1, *kernel.shape).mean(axis=0)
+        # adjust bias to get an overall activity of p_target
+        # dbias = self.p_target - mu_self
+
+        return {
+            "kernel": dkernel,
         }
     
     def compute_dparams(self, params, outs, momentum=None):
@@ -230,10 +213,16 @@ class CentroidTDBase(nn.Module):
         dparams = {
             "params": {
                 "mu": None,
-                "w_f_kernel": None,
-                "w_f_bias": None,
-                "w_p_kernel": None,
-                "w_p_bias": None,
+                "w_f": {
+                    "kernel": None,
+                    "bias": None,
+                },
+                "w_l": {
+                    "kernel": None,
+                },
+                "w_td": {
+                    "kernel": None,
+                }
             }
         }
         
@@ -253,18 +242,22 @@ class CentroidTDBase(nn.Module):
             tmp_params, 
             outs,
         )
-        dw_p = self.compute_dw_p(
+        dw_l = self.compute_dw_l(
             tmp_params,
             outs,
+        )
+        dw_td = self.compute_dw_td(
+            params,
+            outs
         )
         
         # Store all updates
         dparams["params"]["mu"] = dmu
-        dparams["params"]["w_f_kernel"] = dw_f["kernel"]
-        dparams["params"]["w_f_bias"] = dw_f["bias"]
-        dparams["params"]["w_p_kernel"] = dw_p["kernel"]
-        dparams["params"]["w_p_bias"] = dw_p["bias"]
-        
+        dparams["params"]["w_f"]["kernel"] = dw_f["kernel"]
+        dparams["params"]["w_f"]["bias"] = dw_f["bias"]
+        dparams["params"]["w_l"]["kernel"] = dw_l["kernel"]
+        dparams["params"]["w_td"]["kernel"] = dw_td["kernel"]
+
         return dparams
     
     def apply_dparams(self, params, dparams, lr: float = 0.1):
@@ -283,19 +276,29 @@ class CentroidTDBase(nn.Module):
         params["params"]["mu"] = params["params"]["mu"] + dparams["params"]["mu"]
         
         # Update forward weights
-        params["params"]["w_f_kernel"] = (
-            params["params"]["w_f_kernel"] + lr * dparams["params"]["w_f_kernel"]
+        params["params"]["w_f"]["kernel"] = (
+            params["params"]["w_f"]["kernel"] + lr * dparams["params"]["w_f"]["kernel"]
         )
-        params["params"]["w_f_bias"] = (
-            params["params"]["w_f_bias"] + lr * dparams["params"]["w_f_bias"]
+        params["params"]["w_f"]["bias"] = (
+            params["params"]["w_f"]["bias"] + lr * dparams["params"]["w_f"]["bias"]
         )
         
-        # Update prediction weights
-        params["params"]["w_p_kernel"] = (
-            params["params"]["w_p_kernel"] + lr * dparams["params"]["w_p_kernel"]
+        # Update lateral weights
+        params["params"]["w_l"]["kernel"] = (
+            params["params"]["w_l"]["kernel"] + lr * dparams["params"]["w_l"]["kernel"]
         )
-        params["params"]["w_p_bias"] = (
-            params["params"]["w_p_bias"] + lr * dparams["params"]["w_p_bias"]
+
+        # Update TD prediction weights
+        params["params"]["w_td"]["kernel"] = (
+            params["params"]["w_td"]["kernel"] + lr * dparams["params"]["w_td"]["kernel"]
+        )
+
+        # IMPORTANT!!! set kernel diagonal to zero for both lateral and prediction
+        params["params"]["w_l"]["kernel"] = params["params"]["w_l"]["kernel"] - np.diag(
+            np.diag(params["params"]["w_l"]["kernel"])
+        )
+        params["params"]["w_td"]["kernel"] = params["params"]["w_td"]["kernel"] - np.diag(
+            np.diag(params["params"]["w_td"]["kernel"])
         )
         
         return params
@@ -320,19 +323,12 @@ class CentroidTDBase(nn.Module):
         return params, dparams
 
 
-class CentroidTDModule(CentroidTDBase):
+class AntiHebbianTDModule(AntiHebbianTDBase):
     """
-    Recurrent module combining centroid-based forward activation with TD prediction.
-    
-    Forward pass computes:
-    1. y_f: Units activate if input is within distance threshold of centroid
-    2. y_p: Units activate if predicted based on discounted history (TD)
-    3. z: Final activation is AND of y_f and y_p
-    4. u: Updated discounted sum of past activations
-    5. v: Value prediction for future activations
+    Recurrent module combining forward activation based on TD prediction and lateral activation.
     """
     
-    def __call__(self, x, u_prev, v_prev, y_p_prev):
+    def __call__(self, x, u_prev):
         """
         Single time step forward pass.
         
@@ -340,64 +336,48 @@ class CentroidTDModule(CentroidTDBase):
             params: Model parameters
             x: Input (*batch_dims, input_features)
             u_prev: Previous discounted sum of activations (*batch_dims, n_features)
-            v_prev: Previous value prediction (*batch_dims, n_features), used to generate y_p
-            y_p_prev: Prediction of activation, made from the previous step (*batch_dims, n_features) using v_prevprev and v_prev
+            # v_prev: Previous value prediction (*batch_dims, n_features)
+            # y_p_prev: Prediction of activation, made from the previous step (*batch_dims, n_features) using v_prevprev and v_prev
         
         Returns:
             Dictionary with all activations and values
         """
 
-        # Forward activation: activate if within distance threshold
-        kernel_f = self.kernel_f # (input_features, n_features)
-        bias_f = self.bias_f  # (n_features,)
-        
-        # Compute distances from input to each centroid
-        # kernel columns are centroids: we want ||x - w_f_i|| for each i
-        # x: (*batch, input_features), kernel: (input_features, n_features)
-        distances = np.linalg.norm(kernel_f - x[..., None], axis=-2)  # (*batch, n_features)
-        y_f = distances < bias_f  # Boolean activation
-        
-        # Combined activation: AND operation between the input activation and the prediction
-        z = np.logical_and(y_f, y_p_prev)
-        # Update discounted sum of past activations
-        u = self.gamma * u_prev + z.astype(x.dtype)
 
-        # TD-based prediction for next time-step based on past discounted sum
-        # # v_t = W_p^T u_t        
-        kernel_p = self.kernel_p # (n_features, n_features)
-        bias_p = self.bias_p  # (n_features,)
-        # u: (*batch, n_features), kernel_p: (n_features[in], n_features[out])
-        v = (u[..., None] * kernel_p).sum(axis=-2)  # (*batch, n_features[out])
+        # Apply forward weights
+        y = (self.w_f(x) > 0).astype(x.dtype)
+        z = ((self.w_f(x) + self.w_l(y)) > 0).astype(x.dtype)
+
+        # Update discounted sum of activations
+        u = self.gamma * u_prev + x
+
         
-        # TD prediction for next time step
-        y_p_next = v_prev - self.gamma * v
-        y_p_next = y_p_next + bias_p > 0  # Threshold for binary activation
-        
-        # Compute TD error for v_prev, computed on u_prev
-        td_pred_err_prev = z.astype(x.dtype) - y_p_prev.astype(x.dtype)
+        # Compute prediction from discounted trace of past activations
+        v_prev = self.w_td(u_prev)
+        # Compute value prediction
+        v = self.w_td(u)
+        # Compute the TD error on this time-step, ideally v_prev = z + self.gamma * v
+        td_err_prev = (x + self.gamma * v) - v_prev
         
         return {
             # input/output for current time step
             "x": x,
-            "y_f": y_f.astype(x.dtype),
+            "y": y.astype(x.dtype),
             "z": z.astype(x.dtype),
-            # values to be used at next time step
-            "u_next": u,
-            "v_next": v,
-            "y_p_next": y_p_next.astype(x.dtype),
-            # values to be used for TD update of previous prediction
+            # discounted sum to be used at next time step
+            "u": u,
+            # values to be used for TD update
             "u_prev": u_prev,
-            "td_pred_err_prev": td_pred_err_prev,
+            "td_err_prev": td_err_prev,
         }
     
-    def forward_scan(self, x_seq, u_prev_0, v_prev_0, y_p_prev_0, key=None):
+    def forward_scan(self, x_seq, u_prev, key=None):
         """
         Apply network iteratively over a sequence using jax.lax.scan.
         
         Args:
             x_seq: Input sequence (*batch_dims, time_steps, input_features)
-            u0: Initial discounted sum (*batch_dims, n_features)
-            v0: Initial value prediction (*batch_dims, n_features)
+            u0: Initial discounted trace (*batch_dims, n_features)
             key: Random key (not used, but kept for interface compatibility)
         
         Returns:
@@ -405,15 +385,9 @@ class CentroidTDModule(CentroidTDBase):
         """
         def f_scan(carry, input):
             x = input
-            u_prev, v_prev, y_p_prev = carry
-            outputs = self(x, u_prev, v_prev, y_p_prev)
-            
-            # Next carry: updated u and v
-            u_next = outputs["u_next"]
-            v_next = outputs["v_next"]
-            y_p_next = outputs["y_p_next"]
-            
-            return (u_next, v_next, y_p_next), outputs
+            u_prev = carry
+            out = self(x, u_prev)
+            return out["u"], out
         
         # Move time axis to first position for scan
         x_seq = np.moveaxis(x_seq, -2, 0)
@@ -421,7 +395,7 @@ class CentroidTDModule(CentroidTDBase):
         # Perform scan
         _, outputs_seq = jax.lax.scan(
             f_scan, 
-            (u_prev_0, v_prev_0, y_p_prev_0), 
+            u_prev, 
             x_seq
         )
         
@@ -443,20 +417,12 @@ class CentroidTDModule(CentroidTDBase):
         
         Returns:
             u0: Initial discounted sum (*batch_dims, n_features)
-            v0: Initial value prediction (*batch_dims, n_features)
-            y_p0: Initial prediction (*batch_dims, n_features) for next time step activation
         """
         batch_shape = x.shape[:-1]
         state_shape = (*batch_shape, self.n_features)
         
         # initialize u with the expected value for a discounted sum of bernoulli variables each 
         # with a probability of self.p_target
-        u0 = np.ones(state_shape) * self.p_target/(1.0 - self.gamma)
+        u_prev = np.ones(x.shape) * self.p_target/(1.0 - self.gamma)
         
-        # Initialize v to zeros
-        v0 = np.zeros(state_shape)
-
-        # Initialize y_p0 to a bernoulli
-        y_p0 = jax.random.bernoulli(key, p=2*self.p_target, shape=state_shape).astype(x.dtype)
-        
-        return u0, v0, y_p0
+        return {"u_prev": u_prev}

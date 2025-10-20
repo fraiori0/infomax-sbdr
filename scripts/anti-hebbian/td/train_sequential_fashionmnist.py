@@ -5,7 +5,7 @@ import argparse
 default_model = "td"
 default_number = "1"
 
-default_cuda = "3"
+default_cuda = "0"
 
 # base folder
 base_folder = os.path.join(
@@ -116,45 +116,12 @@ data_folder = os.path.join(
 )
 
 # create the transform
-transform = tv_transforms.Compose(
-    [
-        # random resize and cropping
-        tv_transforms.RandomResizedCrop(
-            size=model_config["dataset"]["transform"]["resized_crop"]["size"],
-            scale=model_config["dataset"]["transform"]["resized_crop"]["scale"],
-            ratio=model_config["dataset"]["transform"]["resized_crop"]["ratio"],
-        ),
-        # random horizontal flip
-        tv_transforms.RandomHorizontalFlip(
-            p=model_config["dataset"]["transform"]["flip"]["p"],
-        ),
-        # random color jitter
-        tv_transforms.ColorJitter(
-            brightness=model_config["dataset"]["transform"]["color_jitter"][
-                "brightness"
-            ],
-            contrast=model_config["dataset"]["transform"]["color_jitter"]["contrast"],
-            saturation=model_config["dataset"]["transform"]["color_jitter"][
-                "saturation"
-            ],
-            hue=model_config["dataset"]["transform"]["color_jitter"]["hue"],
-        ),
-        # normalize
-        tv_transforms.Normalize(
-            mean=model_config["dataset"]["transform"]["normalization"]["mean"],
-            std=model_config["dataset"]["transform"]["normalization"]["std"],
-        ),
-        # change from  (C, H, W) to (H, W, C)
-        tv_transforms.Lambda(lambda x: x.movedim(-3, -1)),
-    ]
-)
-
-dataset = sbdr.FashionMNISTDataset(
+dataset = sbdr.FashionMNISTPoissonDataset(
     folder_path=data_folder,
     kind="train",
-    transform=transform,
-    flatten=False,
-    sequential=True,
+    transform=None,
+    flatten=True,
+    **model_config["dataset"]["kwargs"],
 )
 
 dataset_train, dataset_val = torch.utils.data.random_split(
@@ -193,41 +160,6 @@ print()
 
 print(f"\tInput xs: {xs.shape} (dtype: {xs.dtype})")
 print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
-
-# Create a dataset with the original images
-transform_original = tv_transforms.Compose(
-    [
-        tv_transforms.Normalize(
-            mean=model_config["dataset"]["transform"]["normalization"]["mean"],
-            std=model_config["dataset"]["transform"]["normalization"]["std"],
-        ),
-        # change from  (C, H, W) to (H, W, C)
-        tv_transforms.Lambda(lambda x: x.movedim(-3, -1)),
-    ]
-)
-dataset_original = sbdr.FashionMNISTDataset(
-    folder_path=data_folder,
-    kind="train",
-    transform=transform_original,
-    flatten=False,
-    sequential=True,
-)
-# use same split and keep only the originals from the train set
-dataset_original, _ = torch.utils.data.random_split(
-    dataset_original,
-    [
-        1 - model_config["validation"]["split"],
-        model_config["validation"]["split"],
-    ],
-    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
-)
-
-dataloader_original = sbdr.NumpyLoader(
-    dataset_original,
-    batch_size=16,
-    shuffle=model_config["training"]["dataloader"]["shuffle"],
-    drop_last=model_config["training"]["dataloader"]["drop_last"],
-)
 
 
 """---------------------"""
@@ -296,15 +228,13 @@ model_eval = model_class(
 xs, labels = next(iter(dataloader_train))
 # Generate a random initial state
 key = jax.random.key(model_config["model"]["seed"])
-u0, v0, y_p0 = model.generate_initial_state(key, xs[..., 0, :])
+s0 = model.generate_initial_state(key, xs[..., 0, :])
 
 # Init params and batch_stats
 variables = model.init(
     key,
     xs[..., 0, :],
-    u0,
-    v0,
-    y_p0,
+    **s0,
 )
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
@@ -317,7 +247,6 @@ def get_shapes(nested_dict):
 
 pprint(get_shapes(variables))
 
-
 """---------------------"""
 """ Forward Pass """
 """---------------------"""
@@ -326,26 +255,21 @@ print("\nForward scan jitted")
 
 
 def forward_scan(variables, xs_seq, key):
-    u0, v0, y_p0 = model.generate_initial_state(key, xs_seq[..., 0, :])
+    s0 = model.generate_initial_state(key, xs_seq[..., 0, :])
     return model.apply(
         variables,
         xs_seq,
-        u0,
-        v0,
-        y_p0,
-        # key,
+        **s0,
         method=model.forward_scan,
     )
 
 
 def forward_scan_eval(variables, xs_seq, key):
-    u0, v0, y_p0 = model_eval.generate_initial_state(key, xs_seq[..., 0, :])
+    s0 = model_eval.generate_initial_state(key, xs_seq[..., 0, :])
     return model_eval.apply(
         variables,
         xs_seq,
-        u0,
-        v0,
-        y_p0,
+        **s0,
         # key,
         method=model_eval.forward_scan,
     )
@@ -371,6 +295,7 @@ pprint(get_shapes(outs))
 #     forward_jitted(variables, xs_1, key)
 
 # print(f"\tTime for one epoch: {time() - t0}")
+
 
 """---------------------"""
 """ Parameter Update """
@@ -460,7 +385,7 @@ def compute_metrics(outs):
     qs_s_val = np.quantile(s_avg, QS)
 
     # compute average td error
-    td_err = outs["td_pred_err_prev"].mean()
+    td_err = outs["td_err_prev"].mean()
 
     metrics = {
         f"unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)
@@ -536,7 +461,7 @@ metrics_val = eval_step(state, batch)
 print(f"\tMetrics:")
 pprint(metrics)
 
-# exit()
+
 """------------------"""
 """ Logging Utils """
 """------------------"""
@@ -639,11 +564,11 @@ try:
             )
 
         # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
-        xs_original, labels_original = next(iter(dataloader_original))
-        key_val = jax.random.key(epoch_step)
-        outs = forward_eval_jitted(state["variables"], xs_original, key_val)
+        xs_img, labels_img = next(iter(dataloader_val))
+        key_img = jax.random.key(epoch_step)
+        outs_img = forward_eval_jitted(state["variables"], xs_img, key_img)
         # convert to images
-        activation_imgs = activation_seq_to_img(outs["z"])
+        activation_imgs = activation_seq_to_img(outs_img["z"])
         for i in range(activation_imgs.shape[0]):
             writer.add_image(
                 f"activation/img/{i+1}",
