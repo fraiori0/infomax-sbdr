@@ -17,21 +17,20 @@ np.set_printoptions(precision=4, suppress=True)
 pio.renderers.default = "browser"
 
 
+N_OUT_UNITS = 128
+
 models = {
-    # "standard": {
-    #     "3": {"name": r"$p_* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
-    #     "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
-    #     "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
-    #     "4": {"name": r"$p_* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
-    # },
-    "xor": {
-        "1": {"name": r"$p_* = 0.075$", "chkp": 30, "color": "#d62728", "dash": "dash", "symbol": "x"},
+    "td": {
+        # "1": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
+        # "2": {"name": r"$p_* = 0.07$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
+        "3": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
     },
 }
 
 # base folder
 base_folder = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
     os.pardir,
     os.pardir,
 )
@@ -97,7 +96,7 @@ per_unit_activity_bins = {}
 per_sample_activity_bins = {}
 
 low_exponent_unit = -3
-low_exponent_sample = np.log10(1/256 - 1e-6).item()
+low_exponent_sample = np.log10(1/N_OUT_UNITS - 1e-6).item()
 
 max_bin = 0
 min_bin_center_unit = (10**low_exponent_unit)*0.7
@@ -118,7 +117,7 @@ for k in models.keys():
         # create 50 bins in logarithmic scale from 1e-4 to max_avg_act
         bins_unit = np.logspace(low_exponent_unit, np.log10(max_avg_act_unit+1e-4), 50)
         # for the sample activity, instead, we already know is discretized by integer value from 0 to max_tot_act_sample
-        bins_sample = np.arange(1, 50, 1, dtype=np.float32)/256
+        bins_sample = np.arange(1, 50, 1, dtype=np.float32)/N_OUT_UNITS
 
         # pre-pend an initial 0
         bins_unit = np.concatenate((np.zeros(1), bins_unit))
@@ -237,24 +236,22 @@ fig.update_layout(
 )
 fig.show()
 
-# export image as PDF
-fig.write_image(
-    os.path.join(
-        result_folder,
-        "activation_stats.pdf"
-    ),
-    format="pdf",
-    **fig_layout_double_subplot,
-    scale=3,
-)
-
-# exit()
+# # export image as PDF
+# fig.write_image(
+#     os.path.join(
+#         result_folder,
+#         "activation_stats.pdf"
+#     ),
+#     format="pdf",
+#     **fig_layout_double_subplot,
+#     scale=3,
+# )
 
 """---------------------"""
-""" Classification accuracy with varying level of sparsification """
+""" Classification accuracy """
 """---------------------"""
 
-N_K = [512, 50, 40, 30, 20, 10]
+N_K = [N_OUT_UNITS, 32, 16, 8]
 
 # For each model, train a linear SVM after sparsifying the activations by keeping only the k highest activations per sample
 
@@ -272,7 +269,7 @@ def keep_top_k(x, k):
 # NOTE, this nested cycles takes a while to run
 for n_top_k in tqdm(N_K):
 
-    sparsity = 1.0 - n_top_k/256.0
+    sparsity = 1.0 - n_top_k/N_OUT_UNITS
     keep_top_k_jitted = jax.jit(partial(keep_top_k, k=n_top_k))
 
     for k in tqdm(models.keys(), total=len(models.keys()), leave=False):
@@ -282,15 +279,12 @@ for n_top_k in tqdm(N_K):
             
             zs = models[k][kk]["data"]["zs"].copy()#[:take_first]
             zs_val = models[k][kk]["data"]["zs_val"].copy()#[:take_first]
-            labels_onehot = models[k][kk]["data"]["labels_onehot"].copy()#[:take_first]
-            labels_onehot_val = models[k][kk]["data"]["labels_onehot_val"].copy()#[:take_first]
-
-            labels_categorical = labels_onehot.argmax(axis=-1)
-            labels_categorical_val = labels_onehot_val.argmax(axis=-1)
+            labels_categorical = models[k][kk]["data"]["labels_categorical"].copy()#[:take_first]
+            labels_categorical_val = models[k][kk]["data"]["labels_categorical_val"].copy()#[:take_first]
 
             if sparsity > 0.1:
-                zs = keep_top_k_jitted(zs)
-                zs_val = keep_top_k_jitted(zs_val)
+                zs = onp.array(keep_top_k_jitted(zs))
+                zs_val = onp.array(keep_top_k_jitted(zs_val))
 
             svm_model = LinearSVC(
                 random_state=0,
@@ -300,7 +294,7 @@ for n_top_k in tqdm(N_K):
                 C=8,
                 penalty="l1",
                 loss="squared_hinge",
-                max_iter=2000,
+                max_iter=1000,
             )
 
             svm_model.fit(
@@ -332,7 +326,7 @@ for k in models.keys():
 """---------------------"""
 
 fig = go.Figure()
-sparsities = 1.0 - np.array(N_K)/256.0
+sparsities = 1.0 - np.array(N_K)/N_OUT_UNITS
 log_sparsities = 25.0**sparsities
 for k in models.keys():
     for kk in models[k].keys():

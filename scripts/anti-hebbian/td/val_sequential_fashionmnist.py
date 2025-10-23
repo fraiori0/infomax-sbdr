@@ -41,7 +41,7 @@ BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is Tr
 
 # remember to change the pooling function in model definition, if using global pool model
 default_model = "td" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "1"
+default_number = "3"
 default_checkpoint_subfolder = "manual_select" # 
 default_step = 5  # 102
 
@@ -307,20 +307,10 @@ pprint(get_shapes(variables))
 
 print("\nForward pass on the whole training set")
 
-xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
-outs = forward_jitted(variables, xs, key)
 
-# record output and labels
-# history = {
-#     k: [] for k in outs.keys()
-# }
-history = {
-    "z" : [],
-    "labels_categorical" : [],
-}
-
-history_alt = {k : [] for k in history.keys()}
+zs = []
+labels_categorical = []
 
 for i, (xs, labels) in tqdm(enumerate(dataloader_train), total=len(dataloader_train)):
 
@@ -332,36 +322,76 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_train), total=len(dataloader_tr
     key, _ = jax.random.split(key)
     # Compute outputs
     outs = forward_jitted(variables, xs, key)
-    # Average over time
-    # Compute also the output under different conditions
-    # 1. Give as input all 0s, with everything else being the same (check dependence on the input)
-    # outs_alt = forward_eval_jitted(variables, np.zeros_like(xs), z0, key)
-    # 2. Use an all-0 initial state instead (check dependence on initial state)
-    # outs_alt = forward_eval_jitted(variables, xs, np.zeros_like(z0), key)
-    # 3. Zero-out the sample in the middle of the sequence
-    # t_step = xs.shape[-2] // 2
-    # xs_alt = xs.at[..., t_step, :].set(0)
-    # outs_alt = forward_eval_jitted(variables, xs_alt, z0, key)
 
     # Record temporal average of output
-    history["z"].append(onp.array(outs["z"].mean(axis=-2)))
+    zs.append(onp.array(outs["z"].mean(axis=-2)))
 
     # And categorical labels
     lab_cat = labels.argmax(axis=-1)
-    history["labels_categorical"].append(lab_cat)
-    # history_alt["labels_categorical"].append(lab_cat)
+    labels_categorical.append(lab_cat)
+    
+# Convert to have numpy arrays
 
+zs = onp.concatenate(zs, axis=0)
+labels_categorical = onp.concatenate(labels_categorical, axis=0)
 
-# Convert history to have numpy arrays
-for k in history.keys():
-    history[k] = onp.concatenate(history[k], axis=0)
-    # history_alt[k] = np.concatenate(history_alt[k], axis=0)
+history = {
+    "zs": zs,
+    "labels_categorical": labels_categorical,
+}
 
 print(f"\tOutput shapes:")
 
 pprint(get_shapes(history))
 
-print(f"\tAverage Activity: {history['z'].mean()}")
+print(f"\tAverage Activity: {history['zs'].mean()}")
+
+
+"""---------------------"""
+""" Forward pass on validation set """
+"""---------------------"""
+
+print("\nForward pass on the whole validation set")
+
+key = jax.random.key(model_config["model"]["seed"])
+
+zs_val = []
+labels_categorical_val = []
+
+for i, (xs, labels) in tqdm(enumerate(dataloader_val), total=len(dataloader_val)):
+
+    # # For quicker debugging
+    # if i > 20:
+    #     break
+
+    # generate initial state
+    key, _ = jax.random.split(key)
+    # Compute outputs
+    outs = forward_jitted(variables, xs, key)
+
+    # Record temporal average of output
+    zs_val.append(onp.array(outs["z"].mean(axis=-2)))
+
+    # And categorical labels
+    lab_cat = labels.argmax(axis=-1)
+    labels_categorical_val.append(lab_cat)
+    
+# Convert to have numpy arrays
+
+zs_val = onp.concatenate(zs_val, axis=0)
+labels_categorical_val = onp.concatenate(labels_categorical_val, axis=0)
+
+history_val = {
+    "zs_val": zs_val,
+    "labels_categorical_val": labels_categorical_val,
+}
+
+print(f"\tOutput shapes:")
+
+pprint(get_shapes(history_val))
+
+print(f"\tAverage Activity: {history_val['zs_val'].mean()}")
+
 
 """---------------------"""
 """ Save outputs """
@@ -377,4 +407,5 @@ os.makedirs(save_folder, exist_ok=True)
 onp.savez_compressed(
     os.path.join(save_folder, f"activations_chkp_{default_step:03d}.npz"),
     **history,
+    **history_val,
 )

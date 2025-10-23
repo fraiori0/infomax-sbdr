@@ -19,7 +19,8 @@ class AntiHebbianTDBase(nn.Module):
     
     n_features: int
     p_target: float
-    gamma: float = 0.9
+    gamma_f: float = 0.9
+    gamma_l: float = 0.8
     momentum: float = 0.95
     n_input_features: int = None
     init_variance_w_forward: float = 1.0
@@ -29,11 +30,12 @@ class AntiHebbianTDBase(nn.Module):
         # weights learning a TD prediction of the (binary) input
         self.w_td = nn.Dense(
             features=self.n_input_features,
-            kernel_init=nn.initializers.variance_scaling(
-                scale=self.init_variance_w_forward,
-                mode="fan_in",
-                distribution="truncated_normal",
-            ),
+            # kernel_init=nn.initializers.variance_scaling(
+            #     scale=self.init_variance_w_forward,
+            #     mode="fan_in",
+            #     distribution="truncated_normal",
+            # ),
+            kernel_init=nn.initializers.constant(0.0),
             use_bias=False
         )
         # forward weights
@@ -144,14 +146,14 @@ class AntiHebbianTDBase(nn.Module):
         """
         kernel = params["params"]["w_td"]["kernel"]  # (n_features, n_features)
 
-        u_prev = outs["u_prev"]  # (*batch, n_features)
-        td_err_prev = outs["td_err_prev"]  # (*batch, n_features)
+        ux_prev = outs["ux_prev"]  # (*batch, n_features)
+        td_ex_prev = outs["td_ex_prev"]  # (*batch, n_features)
         
         # Standard TD update: delta * u
         # u: (*batch, n_features), td_pred_err: (*batch, n_features)
         # We want: u[..., :, None] * td_pred_err[..., None, :]
         # Result: (*batch, n_features, n_features)
-        ui_deltaj = u_prev[..., :, None] * td_err_prev[..., None, :]
+        ui_deltaj = ux_prev[..., :, None] * td_ex_prev[..., None, :]
         
         # Average over batch dimensions
         dkernel = ui_deltaj.reshape(-1, *kernel.shape).mean(axis=0)
@@ -328,56 +330,64 @@ class AntiHebbianTDModule(AntiHebbianTDBase):
     Recurrent module combining forward activation based on TD prediction and lateral activation.
     """
     
-    def __call__(self, x, u_prev):
+    def __call__(self, x, ux_prev, uz_prev):
         """
         Single time step forward pass.
         
         Args:
             params: Model parameters
             x: Input (*batch_dims, input_features)
-            u_prev: Previous discounted sum of activations (*batch_dims, n_features)
-            # v_prev: Previous value prediction (*batch_dims, n_features)
-            # y_p_prev: Prediction of activation, made from the previous step (*batch_dims, n_features) using v_prevprev and v_prev
+            ux_prev: Previous discounted sum of inputs (*batch_dims, input_features)
+            uz_prev: Previous discounted sum of activations (*batch_dims, n_features)
         
         Returns:
             Dictionary with all activations and values
         """
 
-
-        # Apply forward weights
-        y = (self.w_f(x) > 0).astype(x.dtype)
-        z = ((self.w_f(x) + self.w_l(y)) > 0).astype(x.dtype)
-
-        # Update discounted sum of activations
-        u = self.gamma * u_prev + x
-
-        
         # Compute prediction from discounted trace of past activations
-        v_prev = self.w_td(u_prev)
-        # Compute value prediction
-        v = self.w_td(u)
-        # Compute the TD error on this time-step, ideally v_prev = z + self.gamma * v
-        td_err_prev = (x + self.gamma * v) - v_prev
+        vx_prev = self.w_td(ux_prev)
+
+        # # Encode using:
+        # - forward weights on the input value prediction
+        # - lateral weights on the discounted sum of past activations (why not go an extra step and put also td prediction on the activations? using it as input for lateral weights? cursed? maybe does not make sense, as the next layer would learn and encode a prediction anyway)
+        z = ((self.w_f(vx_prev) + self.w_l(uz_prev)) > 0).astype(ux_prev.dtype)
+        # # Use leaky-integrate and fire model
+        # z = self.gamma * z_prev + self.w_f(self.w_td(x)) + self.w_l(act_z_prev)
+        # act_z = (z > 0).astype(z_prev.dtype)
+        # reset if unit fired
+        # z =  z - z * act_z
+
+        # # Update discounted sum (of past values)
+        # inputs
+        ux = self.gamma_f * ux_prev + x
+        # activations
+        uz = self.gamma_l * uz_prev + z
+
+        # Compute value prediction with new trace
+        vx = self.w_td(ux)
+        # Compute the TD error on this time-step, per Bellman we want v_prev = z + self.gamma_f * v
+        td_ex_prev = (x + self.gamma_f * vx) - vx_prev
         
         return {
             # input/output for current time step
             "x": x,
-            "y": y.astype(x.dtype),
-            "z": z.astype(x.dtype),
-            # discounted sum to be used at next time step
-            "u": u,
+            "z": z,
+            # discounted sums to be used at next time step
+            "ux": ux,
+            "uz": uz,
             # values to be used for TD update
-            "u_prev": u_prev,
-            "td_err_prev": td_err_prev,
+            "ux_prev": ux_prev,
+            "td_ex_prev": td_ex_prev, # TD error on the prediction of x (made from ux_prev)
         }
     
-    def forward_scan(self, x_seq, u_prev, key=None):
+    def forward_scan(self, x_seq, ux_prev, uz_prev, key=None):
         """
         Apply network iteratively over a sequence using jax.lax.scan.
         
         Args:
             x_seq: Input sequence (*batch_dims, time_steps, input_features)
-            u0: Initial discounted trace (*batch_dims, n_features)
+            ux_prev: Initial discounted trace of inputs (*batch_dims, input_features)
+            uz_prev: Initial discounted trace of activations (*batch_dims, n_features)
             key: Random key (not used, but kept for interface compatibility)
         
         Returns:
@@ -385,9 +395,9 @@ class AntiHebbianTDModule(AntiHebbianTDBase):
         """
         def f_scan(carry, input):
             x = input
-            u_prev = carry
-            out = self(x, u_prev)
-            return out["u"], out
+            ux_prev, uz_prev = carry
+            out = self(x, ux_prev, uz_prev)
+            return (out["ux"], out["uz"]), out
         
         # Move time axis to first position for scan
         x_seq = np.moveaxis(x_seq, -2, 0)
@@ -395,7 +405,7 @@ class AntiHebbianTDModule(AntiHebbianTDBase):
         # Perform scan
         _, outputs_seq = jax.lax.scan(
             f_scan, 
-            u_prev, 
+            (ux_prev, uz_prev), 
             x_seq
         )
         
@@ -423,6 +433,10 @@ class AntiHebbianTDModule(AntiHebbianTDBase):
         
         # initialize u with the expected value for a discounted sum of bernoulli variables each 
         # with a probability of self.p_target
-        u_prev = np.ones(x.shape) * self.p_target/(1.0 - self.gamma)
+        ux_prev = np.ones(x.shape) * self.p_target/(1.0 - self.gamma_f)
+        uz_prev = np.ones(state_shape) * self.p_target/(1.0 - self.gamma_l)
         
-        return {"u_prev": u_prev}
+        return {
+            "ux_prev": ux_prev,
+            "uz_prev": uz_prev,
+        }

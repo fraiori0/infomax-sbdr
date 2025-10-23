@@ -3,9 +3,9 @@ import argparse
 
 
 default_model = "td"
-default_number = "1"
+default_number = "3"
 
-default_cuda = "0"
+default_cuda = "2"
 
 # base folder
 base_folder = os.path.join(
@@ -385,7 +385,7 @@ def compute_metrics(outs):
     qs_s_val = np.quantile(s_avg, QS)
 
     # compute average td error
-    td_err = outs["td_err_prev"].mean()
+    td_err = np.abs(outs["td_ex_prev"]).mean()
 
     metrics = {
         f"unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)
@@ -467,7 +467,7 @@ pprint(metrics)
 """------------------"""
 
 def activation_seq_to_img(z_seq):
-    # # width and height are the time step and height, respectively, kinda like the plot of a neural recording
+    # # width and height are the time step and number of features, respectively, kinda like the plot of a neural recording
     # height = z.shape[-1]
     # width = z.shape[-2]
     # add a dummy final channel dimension, like it's grayscale
