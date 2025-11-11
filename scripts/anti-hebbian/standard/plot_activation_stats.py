@@ -18,20 +18,21 @@ pio.renderers.default = "browser"
 
 
 models = {
-    # "standard": {
-    #     "3": {"name": r"$p_* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
-    #     "2": {"name": r"$p_* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
-    #     "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
-    #     "4": {"name": r"$p_* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
-    # },
-    "xor": {
-        "1": {"name": r"$p_* = 0.075$", "chkp": 30, "color": "#d62728", "dash": "dash", "symbol": "x"},
+    "standard": {
+        "3": {"name": r"$p^* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
+        "2": {"name": r"$p^* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
+        "1": {"name": r"$p^* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
+        "4": {"name": r"$p^* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
     },
+    # "xor": {
+    #     "1": {"name": r"$p_* = 0.075$", "chkp": 30, "color": "#d62728", "dash": "dash", "symbol": "x"},
+    # },
 }
 
 # base folder
 base_folder = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
     os.pardir,
     os.pardir,
 )
@@ -96,8 +97,10 @@ for k in models.keys():
 per_unit_activity_bins = {}
 per_sample_activity_bins = {}
 
+N_UNITS = 512
+
 low_exponent_unit = -3
-low_exponent_sample = np.log10(1/256 - 1e-6).item()
+low_exponent_sample = np.log10(1/N_UNITS - 1e-6).item()
 
 max_bin = 0
 min_bin_center_unit = (10**low_exponent_unit)*0.7
@@ -118,7 +121,7 @@ for k in models.keys():
         # create 50 bins in logarithmic scale from 1e-4 to max_avg_act
         bins_unit = np.logspace(low_exponent_unit, np.log10(max_avg_act_unit+1e-4), 50)
         # for the sample activity, instead, we already know is discretized by integer value from 0 to max_tot_act_sample
-        bins_sample = np.arange(1, 50, 1, dtype=np.float32)/256
+        bins_sample = np.arange(1, 100, 2, dtype=np.float32)/N_UNITS
 
         # pre-pend an initial 0
         bins_unit = np.concatenate((np.zeros(1), bins_unit))
@@ -197,28 +200,42 @@ for i, k in enumerate(models.keys()):
                 marker_color=models[k][kk]["color"],
                 legend=f"legend{i+1}",
                 width=(edges[1:] - edges[:-1]),
+                showlegend=False,
             ),
             row=1,
             col=2,
         )   
 
-
-# Set font and axis titles
-for i, (min_bin_center, low_exponent) in enumerate(zip([min_bin_center_unit, min_bin_center_sample], [low_exponent_unit, low_exponent_sample])):
-    fig.update_xaxes(
+fig.update_xaxes(
         title=dict(
             text=r"Average activity (log-scale)",
             font=dict(size=18, family="Times New Roman")),
         tickfont=dict(size=16, family="Times New Roman"),
         row=1,
-        col=i+1,
-        # log scale
+        col=1,
+        # log scale only for index 0
         type="log",
         # set range explicitly
         range=[np.log10(min_bin_center_unit), np.log10(1.01)],
         # add ticks at powers of 10
-        tickvals=[10**j for j in range(int(low_exponent), 1)],
+        tickvals=[10**j for j in range(int(low_exponent_unit), 1)],
     )
+
+fig.update_xaxes(
+        title=dict(
+            text=r"Average activity",
+            font=dict(size=18, family="Times New Roman")),
+        tickfont=dict(size=16, family="Times New Roman"),
+        row=1,
+        col=2,
+        # log scale only for index 0, here use linear scale
+        type="linear",
+    )
+
+
+# Set font and axis titles
+for i, (min_bin_center, low_exponent) in enumerate(zip([min_bin_center_unit, min_bin_center_sample], [low_exponent_unit, low_exponent_sample])):
+    
     fig.update_yaxes(
         title=dict(
             text=r"Frequency",
@@ -227,13 +244,17 @@ for i, (min_bin_center, low_exponent) in enumerate(zip([min_bin_center_unit, min
         row=1, col=i+1
     )
 
+# set font for the title of each subplots
+for i in range(2):
+    fig.layout.annotations[i].font = dict(size=18, family="Times New Roman")
+
 fig.update_layout(
     # title_text=r"Per-unit distribution of average activity",
     barmode="overlay",
-    legend=dict(x=0.01, y=0.99),
+    # legend=dict(x=0.01, y=0.99),
     **fig_layout_double_subplot,
     template="plotly_white",
-    showlegend=False,
+    showlegend=True,
 )
 fig.show()
 
@@ -248,7 +269,7 @@ fig.write_image(
     scale=3,
 )
 
-# exit()
+exit()
 
 """---------------------"""
 """ Classification accuracy with varying level of sparsification """
