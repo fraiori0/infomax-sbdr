@@ -10,6 +10,7 @@ import infomax_sbdr.antihebbian_modules as ah
 import infomax_sbdr.antihebbian_recurrent_modules as rec_ah
 import infomax_sbdr.antihebbian_xor_modules as xor_ah
 import infomax_sbdr.antihebbian_td_modules as td_ah
+import infomax_sbdr.antihebbian_band_modules as band_ah
 
 
 """
@@ -66,6 +67,7 @@ config_ah_module_dict = {
     "AntiHebbianRecurrentModule": rec_ah.AntiHebbianRecurrentModule,
     "AntiHebbianXORModule": xor_ah.AntiHebbianXORModule,
     "AntiHebbianTDModule": td_ah.AntiHebbianTDModule,
+    "AntiHebbianBandModule": band_ah.AntiHebbianBandModule,
 }
 
 
