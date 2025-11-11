@@ -18,15 +18,9 @@ pio.renderers.default = "browser"
 
 
 models = {
-    "standard": {
-        "3": {"name": r"$p^* = 0.01$", "chkp": 20, "color": "#1f77b4", "dash": "solid", "symbol": "circle"},
-        "2": {"name": r"$p^* = 0.02$", "chkp": 20, "color": "#be44ff", "dash": "solid", "symbol": "circle"},
-        "1": {"name": r"$p^* = 0.05$", "chkp": 20, "color": "#2ca02c", "dash": "solid", "symbol": "circle"},
-        "4": {"name": r"$p^* = 0.075$", "chkp": 20, "color": "#d62728", "dash": "solid", "symbol": "circle"},
+    "singleband": {
+        "1": {"name": r"$p_* = 0.05$", "chkp": 20, "color": "#d62728", "dash": "dash", "symbol": "x"},
     },
-    # "xor": {
-    #     "1": {"name": r"$p_* = 0.075$", "chkp": 30, "color": "#d62728", "dash": "dash", "symbol": "x"},
-    # },
 }
 
 # base folder
@@ -333,13 +327,13 @@ for k in models.keys():
             scale=3,
         )
 
-exit()
+# exit()
 
 """---------------------"""
 """ Classification accuracy with varying level of sparsification """
 """---------------------"""
 
-N_K = [512, 50, 40, 30, 20, 10]
+N_K = [256, 30, 20, 10]
 
 # For each model, train a linear SVM after sparsifying the activations by keeping only the k highest activations per sample
 

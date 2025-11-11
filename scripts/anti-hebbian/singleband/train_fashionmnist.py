@@ -3,13 +3,14 @@ import argparse
 
 
 default_model = "singleband"
-default_number = "2"
+default_number = "1"
 
 default_cuda = "0"
 
 # base folder
 base_folder = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
     os.pardir,
     os.pardir,
 )
@@ -300,6 +301,18 @@ key = jax.random.key(model_config["model"]["seed"])
 # Init params and batch_stats
 variables = model.init(key, xs)
 
+# re-initialize variables with a some batches of data
+xs = []
+for i in range(4):
+    xs.append(next(iter(dataloader_train))[0])
+xs = np.concatenate(xs, axis=0)
+variables = model.apply(
+    variables,
+    variables,
+    xs,
+    method=model.initialize_params,
+)
+
 print(f"\tDict of variables: \n\t{variables.keys()}")
 
 
@@ -360,8 +373,8 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
-def update_params(variables, **kwargs):
-    return model.update_params(variables, **kwargs)
+def update_params(variables, outs, **kwargs):
+    return model.update_params(variables, outs, **kwargs)
 update_params_jitted = jit(update_params)
 
 """---------------------"""
@@ -444,7 +457,7 @@ def train_step(state, batch):
 
     params, d_params = update_params_jitted(
         state["variables"],
-        **outs,
+        outs=outs,
         lr=model_config["training"]["learning_rate"],
         momentum=model_config["model"]["kwargs"]["momentum"],
     )

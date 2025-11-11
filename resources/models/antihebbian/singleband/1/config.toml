@@ -2,13 +2,12 @@
 type = "AntiHebbianBandModule"
 seed = 41
 [model.kwargs]
-n_features = 512
+n_features = 256
 p_target = 0.05
-momentum = 0.97
-init_variance_w_forward = 1.0
-init_variance_w_lateral = 1.0
-bias_init_value = 0.0
-use_dropout = true
+momentum = 0.95
+init_variance_w = 0.5
+weight_l2 = 0.01
+use_dropout = false
 dropout_rate = 0.2
 # training = true
    
@@ -33,7 +32,7 @@ hue = 0.15
 [training]
 epochs = 100
 batch_size = 128
-learning_rate = 0.003
+learning_rate = 0.05
 
 [training.checkpoint]
 save = true

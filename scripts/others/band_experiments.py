@@ -3,14 +3,17 @@ import jax
 import jax.numpy as np
 import numpy as onp
 import plotly.graph_objects as go
+import plotly.io as pio
 import sklearn as skl
 from sklearn.decomposition import PCA
 import infomax_sbdr as sbdr
 from tqdm import tqdm
 
 np.set_printoptions(precision=4, suppress=True)
+pio.renderers.default = "browser"
 
-SEED = 987156
+SEED = 986
+SEED_PARAMS = 2
 
 N_IN_FEATURES = 3
 N_SAMPLES = 200
@@ -43,6 +46,7 @@ samples_neg = gaussian_samples[onp.arange(N_SAMPLES_NEG), mask_neg]
 
 # Initialize an hyperplane
 
+rng_params = jax.random.PRNGKey(SEED_PARAMS)
 params = {
     "w": rng.standard_normal(N_IN_FEATURES),
     "b": onp.zeros((1,))
@@ -59,15 +63,20 @@ def get_plane_points(params, x_range=(-1, 1), y_range=(-1, 1), resolution=5):
 
     Z = -(params["w"][0] * X + params["w"][1] * Y + params["b"]) / (params["w"][2] + 1e-6)
     return np.stack([X, Y, Z], axis=-1)
-    
-print("\nOriginal shape of parameters:")
-sbdr.print_pytree_shapes(params)
 
-error = np.dot(samples, params["w"]) + params["b"]
-error_neg = np.dot(samples_neg, params["w"]) + params["b"]
+# print("\nOriginal shape of parameters:")
+# sbdr.print_pytree_shapes(params)
 
-print(f"\tError before training: {error.mean()} ({error.std()})")
-print(f"\t    negative samples: {error_neg.mean()} ({error_neg.std()})")
+def get_mse(params, samples):
+    y = np.dot(samples, params["w"]) + params["b"]
+    d_signed = y / (np.dot(params["w"], params["w"]) + 1e-6)
+    return d_signed**2
+
+error = get_mse(params, samples)
+error_neg = get_mse(params, samples_neg)
+
+print(f"\nError before training: {error.mean()} ({error.std()})")
+print(f"\tnegative samples: {error_neg.mean()} ({error_neg.std()})")
 
 # Train the weights using sgd
 
@@ -75,61 +84,59 @@ N_EPOCHS = 75
 N_BATCH = 10
 LR = 0.1
 LR_NEG = 0.1
-REG = 0
+REG = 0.1
 
 history = {
     "norm_w": [],
+    "bias": [],
 }
 
 for ne in tqdm(range(N_EPOCHS)):
-    
+
     # shuffle the samples
     samples = samples[rng.permutation(N_SAMPLES)]
     # shuffle also the negative samples
     samples_neg = samples_neg[rng.permutation(N_SAMPLES_NEG)]
-    
+
     # pass through batches (skip last)
     for nb in tqdm(range(N_SAMPLES // N_BATCH), leave=False):
-        
+
         x_batch = samples[nb * N_BATCH : (nb + 1) * N_BATCH]
         # take N_BATCH negative samples at random
         x_batch_neg = samples_neg[rng.choice(N_SAMPLES_NEG, size=N_BATCH)]
 
         # compute projection on hyperplane
-        y_batch = np.dot(x_batch, params["w"]) + params["b"]
-        y_batch_neg = np.dot(x_batch_neg, params["w"]) + params["b"]
-        # just take the signs
-        y_batch = np.sign(y_batch)
-        y_batch_neg = np.sign(y_batch_neg)
+        y = np.dot(x_batch, params["w"]) + params["b"]
+        y_neg = np.dot(x_batch_neg, params["w"]) + params["b"]
 
         # # # Compute parameter updates FOR POSITIVE SAMPLES
-        rho = np.dot(params["w"], params["w"])
-        # Weights
-        # dw = y_batch[..., None] * params["w"] - rho * x_batch - REG*rho*params["w"]
-        dw = -y_batch[..., None] * x_batch - REG*params["w"]
-        dw = dw.mean(axis=0)
-        # Bias
-        db = -y_batch[..., None]
-        db = db.mean(axis=0)
+        wTw = np.dot(params["w"], params["w"])
+        alpha = y / (wTw + 1e-4)
+        # # Weights
+        dw = -alpha[..., None] * (x_batch - alpha[..., None]*params["w"])
+        dw = dw.mean(axis=0) #- REG*params["w"]
+        # # Bias
+        db = -alpha
+        db = db.mean(axis=0)#- REG*params["b"]
         # # # Update with positive samples
         params["w"] = params["w"] + LR * dw
         params["b"] = params["b"] + LR * db
 
         # # # Compute parameter updates FOR NEGATIVE SAMPLES
-        rho = np.dot(params["w"], params["w"])
-        # Weights
+        # # Weights
         # dw = rho * x_batch_neg - y_batch_neg[..., None] * params["w"] #  - REG*rho*params["w"]
-        dw = y_batch_neg[..., None] * x_batch_neg - REG*params["w"]
-        dw = dw.mean(axis=0)
-        # # Bias
-        # db = -y_batch_neg[..., None]
-        # db = db.mean(axis=0)
+        alpha_neg = y_neg / (wTw + 1e-4)
+        # # Weights
+        dw_neg = alpha_neg[..., None] * (x_batch_neg - alpha_neg[..., None]*params["w"])
+        dw_neg = dw_neg.mean(axis=0) #- REG*params["w"]
         # # # Update with negative samples
         params["w"] = params["w"] + LR_NEG * dw
         # params["b"] = params["b"] + LR * db
 
         # Store the norm of W
         history["norm_w"].append(np.linalg.norm(params["w"]))
+        # and the bias
+        history["bias"].append(params["b"].item())
 
         # # # Normalization
         # # Unit norm (standard, L2)
@@ -137,15 +144,17 @@ for ne in tqdm(range(N_EPOCHS)):
         # # Unit L1 norm
         # params["w"] = params["w"] / np.abs(params["w"]).sum(axis=-1, keepdims=True)
 
-    
 
-print("\nFinal shape of parameters:")
-sbdr.print_pytree_shapes(params)
-error = np.dot(samples, params["w"]) + params["b"]
-error_neg = np.dot(samples_neg, params["w"]) + params["b"]
 
-print(f"\tError after training: {error.mean()} ({error.std()})")
-print(f"\t    negative samples: {error_neg.mean()} ({error_neg.std()})")
+# print("\nFinal shape of parameters:")
+# sbdr.print_pytree_shapes(params)
+
+
+error = get_mse(params, samples)
+error_neg = get_mse(params, samples_neg)
+
+print(f"\nError after training: {error.mean()} ({error.std()})")
+print(f"\tnegative samples: {error_neg.mean()} ({error_neg.std()})")
 
 
 
@@ -183,8 +192,8 @@ fig.add_trace(
         x=points_original[:, :, 0],
         y=points_original[:, :, 1],
         z=points_original[:, :, 2],
-        opacity=0.2,
-        colorscale=[[0, 'blue'], [1.0, 'blue']],
+        opacity=0.1,
+        colorscale=[[0, 'green'], [1.0, 'green']],
     )
 )
 
@@ -193,8 +202,8 @@ fig.add_trace(
         x=points_trained[:, :, 0],
         y=points_trained[:, :, 1],
         z=points_trained[:, :, 2],
-        opacity=0.5,
-        colorscale=[[0, 'green'], [1.0, 'green']],
+        opacity=0.25,
+        colorscale=[[0, 'blue'], [1.0, 'blue']],
     )
 )
 
@@ -204,7 +213,7 @@ fig.update_layout(scene_aspectmode="data") # , scene_aspectratio=dict(x=1, y=1, 
 fig.show()
 
 
-# Plot the norm of w over time
+# Plot the norm of w and the biasover time
 fig = go.Figure()
 
 fig.add_trace(
@@ -214,5 +223,14 @@ fig.add_trace(
         mode="lines",
     )
 )
+
+fig.add_trace(
+    go.Scatter(
+        x=np.arange(len(history["bias"])),
+        y=history["bias"],
+        mode="lines",
+    )
+)
+
 
 fig.show()

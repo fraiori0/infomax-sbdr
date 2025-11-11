@@ -29,25 +29,29 @@ import cv2
 from tqdm import tqdm
 
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.io as pio
 import matplotlib.pyplot as plt
 
 from sklearn.svm import LinearSVC, SVC
 
 # np.set_printoptions(precision=4, suppress=True)
+pio.renderers.default = "browser"
 
 BINARIZE = True  # whether to binarize the outputs or not
 BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is True
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "xor" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_model = "singleband" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
 default_number = "1"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 30  # 102
+default_step =20  # 102
 
 # base folder
 base_folder = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
     os.pardir,
     os.pardir,
 )
@@ -257,7 +261,53 @@ def get_shapes(nested_dict):
 
 pprint(get_shapes(variables))
 
+"""---------------------"""
+""" Plot some weight vectors """
+"""---------------------"""
 
+n_plots = 6
+n_cols = 3
+n_rows = n_plots // n_cols + (n_plots % n_cols > 0)
+
+w_kernel = variables["params"]["wb"]["kernel"]
+
+w_kernel = w_kernel / np.linalg.norm(w_kernel, axis=-2, keepdims=True)
+
+# pick the input weights of some random units
+key = jax.random.key(model_config["model"]["seed"])
+idxs = jax.random.choice(key, w_kernel.shape[-1], (n_plots,), replace=False)
+ws = w_kernel[:, idxs]
+
+
+fig = make_subplots(
+    rows=n_rows, cols=n_cols,
+    subplot_titles=tuple(f"Unit {i}" for i in idxs),
+    horizontal_spacing=0.1,
+    vertical_spacing=0.15,
+)
+
+for i in range(n_plots):
+    fig.add_trace(
+        go.Heatmap(
+            z=ws[:, i].reshape(28, 28),
+            # colorscale="rdbu",
+            showscale=True,
+        ),
+        row=(i // n_cols) + 1,
+        col=(i % n_cols) + 1,
+    )
+
+fig.update_layout(
+    showlegend=False,
+    width=1000,
+    height=1000,
+    margin=dict(l=0, r=0, t=0, b=0),
+    font=dict(size=16, family="Times New Roman"),
+)
+
+fig.show()
+
+exit()
 """---------------------"""
 """ Forward Pass """
 """---------------------"""
