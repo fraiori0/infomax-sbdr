@@ -290,7 +290,7 @@ for k in models.keys():
         fig_dict[k][kk].add_trace(
             go.Heatmap(
                 z=zs_cov,
-                colorscale="bluered",
+                colorscale=[(0,"white"), (1,"red")],
                 colorbar=dict(
                     tickfont=dict(size=14, family="Times New Roman"),
                 ),
@@ -326,9 +326,9 @@ for k in models.keys():
         fig_dict[k][kk].write_image(
             os.path.join(
                 result_folder,
-                f"activation_covariance.pdf"
+                f"activation_covariance.png"
             ),
-            format="pdf",
+            # format="pdf",
             **fig_layout_single,
             scale=3,
         )
@@ -338,6 +338,7 @@ exit()
 """---------------------"""
 """ Classification accuracy with varying level of sparsification """
 """---------------------"""
+N_UNITS = 512
 
 N_K = [512, 50, 40, 30, 20, 10]
 
@@ -357,7 +358,7 @@ def keep_top_k(x, k):
 # NOTE, this nested cycles takes a while to run
 for n_top_k in tqdm(N_K):
 
-    sparsity = 1.0 - n_top_k/256.0
+    sparsity = 1.0 - n_top_k/N_UNITS
     keep_top_k_jitted = jax.jit(partial(keep_top_k, k=n_top_k))
 
     for k in tqdm(models.keys(), total=len(models.keys()), leave=False):
@@ -417,7 +418,7 @@ for k in models.keys():
 """---------------------"""
 
 fig = go.Figure()
-sparsities = 1.0 - np.array(N_K)/256.0
+sparsities = 1.0 - np.array(N_K)/N_UNITS
 log_sparsities = 25.0**sparsities
 for k in models.keys():
     for kk in models[k].keys():
