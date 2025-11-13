@@ -3,8 +3,9 @@ import argparse
 
 
 
-default_model = "tmp"
-default_number = "1"
+default_model = "dense_sigmoid_logand"
+default_number = "5slab"
+default_cuda = "1"
 
 # base folder
 base_folder = os.path.join(
@@ -37,7 +38,7 @@ parser.add_argument(
     "--cuda_devices",
     type=str,
     help="Cuda available devices (as string)",
-    default=default_number,
+    default=default_cuda,
 )
 
 args = parser.parse_args()
@@ -334,9 +335,9 @@ def forward(variables, xs, key):
         # DROPOUT
         # key for dropout
         rngs={"dropout": key},
-        # BATCH_NORM
-        # batch stats should be updated
-        mutable=["batch_stats"],
+        # # BATCH_NORM
+        # # batch stats should be updated
+        # mutable=["batch_stats"],
     )
 
 
@@ -344,8 +345,8 @@ def forward_eval(variables, xs):
     return model_eval.apply(
         variables,
         xs,
-        # BATCH_NORM
-        mutable=["batch_stats"],
+        # # BATCH_NORM change here
+        # mutable=["batch_stats"],
     )
 
 
@@ -358,15 +359,19 @@ forward_eval_jitted = jit(forward_eval)
 # xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
 
-outs, mutable_updates = forward_jitted(variables, xs_1, key)
-_, _ = forward_eval_jitted(variables, xs_1)
+# BATCH_NORM - change here
+# outs, mutable_updates = forward_jitted(variables, xs_1, key)
+# _, _ = forward_eval_jitted(variables, xs_1)
+outs = forward_jitted(variables, xs_1, key)
+_ = forward_eval_jitted(variables, xs_1)
 
 print(f"\tInput shape: {xs_1.shape}")
 print(f"\tOutput shapes:")
 pprint(get_shapes(outs))
 
-print(f"\tMutable updates:")
-pprint(get_shapes(mutable_updates))
+# BATCH_NORM - change here
+# print(f"\tMutable updates:")
+# pprint(get_shapes(mutable_updates))
 
 # print(f"\nTest one epoch:")
 # # test time for one epoch
@@ -426,8 +431,11 @@ flo_loss_jitted = jit(flo_loss)
 key = jax.random.key(model_config["model"]["seed"])
 key_1, key_2 = jax.random.split(key)
 
-outs_1, _ = forward(variables, xs_1, key_1)
-outs_2, _ = forward(variables, xs_2, key_2)
+# BATCH_NORM - change here
+# outs_1, _ = forward(variables, xs_1, key_1)
+# outs_2, _ = forward(variables, xs_2, key_2)
+outs_1 = forward(variables, xs_1, key_1)
+outs_2 = forward(variables, xs_2, key_2)
 
 loss = flo_loss_jitted(outs_1, outs_2)
 
@@ -488,21 +496,25 @@ print("\nTraining and Evaluation Steps")
 def train_step(state, batch):
     def loss_fn(params):
         # Apply the model
-        outs_1, mutable_updates_1 = forward(
+        # BATCH_NORM - change here
+        # outs_1, mutable_updates_1 = forward(
+        outs_1 = forward(
             {
                 "params": params,
-                # BATCH_NORM - change here
-                "batch_stats": state["variables"]["batch_stats"],
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_1"],
             batch["key_1"],
         )
         # Apply the model to the augmented images
-        outs_2, mutable_updates_2 = forward(
+        # BATCH_NORM - change here
+        # outs_2, mutable_updates_2 = forward(
+        outs_2 = forward(
             {
                 "params": params,
-                # BATCH_NORM - change here
-                "batch_stats": state["variables"]["batch_stats"],
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_2"],
             batch["key_2"],
@@ -549,9 +561,10 @@ def train_step(state, batch):
         }
 
         others = {
-            "mutable_updates": jax.tree.map(
-                lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
-            ),
+            # BATCH_NORM - change here
+            # "mutable_updates": jax.tree.map(
+            #     lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
+            # ),
         }
 
         return loss_val, (metrics, others)
@@ -567,9 +580,9 @@ def train_step(state, batch):
     # Update optimizer state
     state["opt_state"] = opt_state
 
-    # BATCH_NORM - change here
-    # update batch stats
-    state["variables"]["batch_stats"] = others["mutable_updates"]["batch_stats"]
+    # # BATCH_NORM - change here
+    # # update batch stats
+    # state["variables"]["batch_stats"] = others["mutable_updates"]["batch_stats"]
 
     # update step
     state["step"] += 1
@@ -581,20 +594,24 @@ def train_step(state, batch):
 def eval_step(state, batch):
     def loss_fn(params):
         # Apply the model
-        outs_1, mutable_updates_1 = forward_eval(
+        # BATCH_NORM - change here
+        # outs_1, mutable_updates_1 = forward_eval(
+        outs_1 = forward_eval(
             {
                 "params": params,
-                # BATCH_NORM - change here
-                "batch_stats": state["variables"]["batch_stats"],
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_1"],
         )
         # Apply the model to the augmented images
-        outs_2, mutable_updates_2 = forward_eval(
+        # BATCH_NORM - change here
+        # outs_2, mutable_updates_2 = forward_eval(
+        outs_2 = forward_eval(
             {
                 "params": params,
-                # BATCH_NORM - change here
-                "batch_stats": state["variables"]["batch_stats"],
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_2"],
         )
@@ -624,9 +641,9 @@ def eval_step(state, batch):
         }
 
         others = {
-            "mutable_updates": jax.tree.map(
-                lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
-            ),
+            # "mutable_updates": jax.tree.map(
+            #     lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
+            # ),
         }
 
         return loss_val, (metrics, others)
@@ -778,7 +795,9 @@ try:
 
         # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
         xs_original, labels_original = next(iter(dataloader_original))
-        outs, _ = forward_eval_jitted(state["variables"], xs_original)
+        # BATCH_NORM - change here
+        # outs, _ = forward_eval_jitted(state["variables"], xs_original)
+        outs = forward_eval_jitted(state["variables"], xs_original)
         # convert to images
         activation_img = activation_to_img(outs["z"])
         for i in range(activation_img.shape[0]):

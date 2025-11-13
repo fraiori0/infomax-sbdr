@@ -51,6 +51,7 @@ config_optimizer_dict = {
 
 config_module_dict = {
     "DenseFLO": DenseFLO,
+    "DenseSlabFLO": DenseSlabFLO,
     "ConvFLONoPoolNoLast": ConvFLONoPoolNoLast,
     "ConvFLONoPool": ConvFLONoPool,
     "VGGFLO": VGGFLO,
