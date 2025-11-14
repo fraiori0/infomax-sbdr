@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] =  "3"
+os.environ["CUDA_VISIBLE_DEVICES"] =  "2"
 
 from functools import partial
 import argparse
@@ -315,7 +315,7 @@ pprint(get_shapes(outs))
 
 print("\nPlot the top-k weights activated by some sample input")
 
-N_TOP_K = 5
+N_TOP_K = 20
 
 def keep_top_k(x, k):
     """ Keep only the k highest activations per sample, set rest to 0 """
@@ -463,30 +463,62 @@ def nullspace_projection(x, K):
     # Formula : P = (I - K^T (K K^T)^{-1} K)
     # out = P x
     n = K.shape[-1]
-    Q, _ = np.linalg.qr(K.T, mode='reduced')  # Q: (n, k)
-    
-    # P = I - Q @ Q^T
-    I = np.eye(n)
-    P = I - Q @ Q.T
+    # Q, _ = np.linalg.qr(K.T, mode='reduced')  # Q: (n, k)
+    # # P = I - Q @ Q^T
+    # I = np.eye(n)
+    # P = I - Q @ Q.T
 
-    return P @ x
+    A = np.linalg.pinv(K @ K.T)
+    A = K.T @ A
+    P = np.eye(n) - A @ K
+
+    aux = {
+        "P": P,
+        "A": A,
+    }
+
+    return P @ x, aux
+
 
 # Diffusion step
-def diffusion_step(key, x, K, t):
+def diffusion_step(key, x, K, b, t):
     # t in [0, 1]
     # Compute noise, considering some noise schedule
-    mu = x * np.sqrt(t)
-    sigma_scale = 0.5
-    sigma = sigma_scale*(1.0 - t)
-    noise = jax.random.normal(key, mu.shape) * sigma
+    mu = x * t
+    sigma_scale = 1.0
+    sigma = sigma_scale*np.sqrt(2*(1.0- t))
 
-    # Apply noise
-    x = mu + noise
+    # # # Gaussian noise on x
+    # noise = jax.random.normal(key, x.shape) * sigma
+    # or, compute noise along k directions
+    # noise = jax.random.normal(key, K.shape[-2]) * sigma 
+    # noise = noise[:, None] * K
+    # noise = noise.sum(axis=-2)
+    e = 0.5 * (K @ x + b).T @ (K @ x + b)
+    dx_e = K.T @ (K @ x + b)
+    noise = - 0.1 * dx_e
+    x = x + noise
+    print(e)
+    
+    # # Project noise on the nullspace of K
+    # noise_proj, p_aux = nullspace_projection(noise, K)
+    
+    # # Apply noise
+    # x = x + noise
 
-    # Apply nullspace projection
-    x = nullspace_projection(x, K)
+    # # Take A and compute x such that is the closest to x but solves (K x + b) = 0
+    # A = p_aux["A"]
+    # x = x - A @ (K @ x + b)
 
-    return x
+    # # Project
+    # x, _ = nullspace_projection(x, K)
+    # x = x + noise_proj
+
+    aux = {
+        "noise": noise,
+    }
+
+    return x, aux
 
 def step(key, x, t):
     # Compute encoding
@@ -497,33 +529,56 @@ def step(key, x, t):
     bias = variables["params"]["layers"]["layers_0"]["h"]["bias"] # (out_features,)
     kernel_topk, bias_topk = topk_mask(z, kernel, bias)
 
-    # Diffusion step
-    x = diffusion_step(key, x, kernel_topk, t)
+    # normalize kernel weights to be unit vectors
+    kernel_topk = kernel_topk / (np.linalg.norm(kernel_topk, axis=-2, keepdims=True) + 1e-4)
 
-    return x
+    # Diffusion step
+    x, aux = diffusion_step(key, x, kernel_topk, bias_topk, t)
+
+    aux["kernel_topk"] = kernel_topk
+    aux["bias_topk"] = bias_topk
+    aux["t"] = t
+    aux["x"] = x
+    aux["z"] = z
+
+    return x, aux
 
 # test one step
 key = jax.random.key(model_config["model"]["seed"])
 xs, labels = next(iter(dataloader_train))
-
-x0 = jax.random.normal(key, xs.shape[-1])*0.2
+# xs, labels = next(iter(dataloader_train))
+OFFSET = 4
+# x0 = jax.random.normal(key, xs.shape[-1])*0.2
+x0 = xs[OFFSET] + jax.random.normal(key, xs.shape[-1])*0.4
+_, aux = step(key, x0, 0)
 
 history = {
-    "t": [],
-    "x": [],
+    k : [] for k in aux.keys()
 }
 for t in np.linspace(0, 1, 50):
-    history["t"].append(t)
-    history["x"].append(x0.copy())
     key, _ = jax.random.split(key)
-    x0 = step(key, x0, t)
-    print(f"\tTime: {t:.2f} - Output shape: {x0.shape}")
+    x0, aux = step(key, x0, t)
+    for k in history.keys():
+        history[k].append(aux[k])
+    # print(f"\tTime: {t:.2f} - Output shape: {x0.shape}")
 
 # convert to numpy arrays
 print("History shapes:")
 for k in history.keys():
     history[k] = np.array(history[k])
     print(f"\t{k} : {history[k].shape}")
+
+# Plot z
+
+fig = go.Figure()
+
+fig.add_trace(
+    go.Heatmap(
+        z=history["z"].T,
+    )
+)
+
+fig.show()
 
 # Plot the evolution of the input
 
