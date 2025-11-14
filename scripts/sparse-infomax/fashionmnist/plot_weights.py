@@ -458,7 +458,7 @@ We start from pure noise, and we apply perturbations.
 A perturbations is pure noise from where we remove the components corresponding to the weights of the active units.
 """
 @jit
-def nullspace_projection(x, K):
+def nullspace_projector(K):
     # Compute the null-space projector of the matrix K, assumed to have shape (n_components, n_features)
     # Formula : P = (I - K^T (K K^T)^{-1} K)
     # out = P x
@@ -472,19 +472,24 @@ def nullspace_projection(x, K):
     A = K.T @ A
     P = np.eye(n) - A @ K
 
-    aux = {
+    out = {
         "P": P,
         "A": A,
     }
 
-    return P @ x, aux
+    return out
 
 
 # Diffusion step
 def diffusion_step(key, x, K, b, t):
     # t in [0, 1]
-    # Compute noise, considering some noise schedule
-    mu = x * t
+
+    # Compute null space projector
+    aux = nullspace_projector(K)
+    P = aux["P"]
+    A = aux["A"]
+
+    # Compute noise scale, considering some noise schedule
     sigma_scale = 1.0
     sigma = sigma_scale*np.sqrt(2*(1.0- t))
 
@@ -494,9 +499,10 @@ def diffusion_step(key, x, K, b, t):
     # noise = jax.random.normal(key, K.shape[-2]) * sigma 
     # noise = noise[:, None] * K
     # noise = noise.sum(axis=-2)
-    e = 0.5 * (K @ x + b).T @ (K @ x + b)
-    dx_e = K.T @ (K @ x + b)
-    noise = - 0.1 * dx_e
+    # Error based, minimize distance error
+    # e = 0.5 * (K @ x + b).T @ (K @ x + b)
+    e = ((K @ x + b)[..., None] * K).sum(axis=-2)
+    noise = 0.1 * e
     x = x + noise
     print(e)
     

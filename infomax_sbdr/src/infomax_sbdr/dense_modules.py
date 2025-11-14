@@ -81,7 +81,7 @@ class HyperplaneLayer(nn.Module):
         bias = self.variables["params"]["h"]["bias"]
 
         # normalize weights to unit norm (separately for each unit)
-        kernel = kernel / (np.linalg.norm(kernel, axis=0, keepdims=True) + 1e-6)
+        kernel = kernel / (np.linalg.norm(kernel, axis=-2, keepdims=True) + 1e-6)
 
         # compute the squared distances from the hyperplane w^T x + b = 0
         d = (x[..., None] * kernel).sum(axis=-2) + bias
