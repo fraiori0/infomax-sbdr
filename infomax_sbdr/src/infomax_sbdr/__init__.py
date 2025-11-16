@@ -12,3 +12,4 @@ from infomax_sbdr.torch2jaxdataloader import *
 from infomax_sbdr.predefined_modules import *
 from infomax_sbdr.dataset_classifier import *
 from infomax_sbdr.dataset_xor import *
+import infomax_sbdr.analytic_score_diffusion as analytic_score_diffusion
