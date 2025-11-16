@@ -76,6 +76,9 @@ from torchvision import transforms as tv_transforms
 import cv2
 from tqdm import tqdm
 
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 np.set_printoptions(precision=4, suppress=True)
 
 # print available devices
@@ -188,6 +191,108 @@ print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
 
 
 """---------------------"""
+""" K-Means """
+"""---------------------"""
+
+from sklearn.cluster import KMeans
+
+N_CLUSTERS = 256
+
+print("\nK-means")
+
+Xs = []
+for i, (xs, labels) in enumerate(dataloader):
+    # for faster debugging
+    if i > 10:
+        break
+    Xs.append(xs)
+Xs = np.concatenate(Xs, axis=0)
+
+# Train a K-means model
+kmeans = KMeans(
+    n_clusters=N_CLUSTERS,
+)
+kmeans.fit(onp.array(Xs))
+
+# Take the centroids
+
+Ks = np.array(kmeans.cluster_centers_)
+
+print(f"\tKs shape: {Ks.shape}")
+
+xs, labels = next(iter(dataloader))
+print(f"\tInput xs: {xs.shape} (dtype: {xs.dtype})")
+print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
+
+# Compute topk centroids
+
+Ks_topk, aux = sbdr.analytic_score_diffusion.topk_centroids(xs, Ks, k=10)
+
+print(f"\tKs_topk shape: {Ks_topk.shape}")
+
+print(aux["z"].shape)
+print(aux["d_topk"].shape)
+
+
+"""---------------------"""
+""" Compute and plot some encodings """
+"""---------------------"""
+
+print("\nCentroid encodings")
+
+Zs = []
+for i, (xs, labels) in enumerate(dataloader):
+    # for faster debugging
+    if i > 10:
+        break
+    _, aux = sbdr.analytic_score_diffusion.topk_centroids(xs, Ks, k=10)
+    Zs.append(aux["z"])
+Zs = np.concatenate(Zs, axis=0)
+
+print(f"\tZs shape: {Zs.shape}")
+
+# Plot the covariance matrix and the distribution of average unit activity
+cov_z = np.cov(Zs.T)
+print(f"\tCovariance matrix shape: {cov_z.shape}")
+
+# Plot the distribution of average unit activity
+avg_z = np.mean(Zs, axis=0)
+print(f"\tAverage unit activity shape: {avg_z.shape}")
+
+fig = make_subplots(rows=1, cols=2, subplot_titles=["Covariance matrix", "Average unit activity"])
+
+fig.add_trace(
+    go.Heatmap(
+        z=cov_z,
+        colorscale="plasma",
+        showscale=True,
+        colorbar=dict(
+            title="Value",
+            xanchor="left",
+            x=0.05
+        )
+    ),
+    row=1, col=1
+)
+
+fig.add_trace(
+    go.Histogram(
+        x=avg_z,
+        name="Average unit activity",
+        opacity=0.5,
+        nbinsx=50,
+        histnorm="probability",
+        # marker_color=models[k][kk]["color"],
+        legend="legend1"
+    ),
+    row=1, col=2
+)
+
+fig.show()
+
+exit()
+
+"""---------------------"""
 """ Analytic Diffusion Model """
 """---------------------"""
 
@@ -198,7 +303,7 @@ xs, labels = next(iter(dataloader))
 
 # Test the functions related to analytic score diffusion
 
-ks = xs
+ks = Ks.copy()
 t0 = 0.1
 phi_T = jax.random.truncated_normal(key, -1.0, 1.0, ks.shape[-1])
 alpha_bar_t = sbdr.analytic_score_diffusion.cosine_schedule(t0)
@@ -237,12 +342,22 @@ print(f"\tphi_t shape: {phi_t.shape}")
 print(f"\taux: {aux}")
 
 
+key = jax.random.key(69)
 phi_ts, aux = sbdr.analytic_score_diffusion.diffuse_with_subsets(
     key,
     phi_T,
     ks,
     T_max=1.0,
     num_steps=100
+)
+
+phi_ts, aux = sbdr.analytic_score_diffusion.diffuse_topk(
+    key,
+    phi_T,
+    ks,
+    T_max=1.0,
+    num_steps=100,
+    topk=10,
 )
 
 print(f"\n\tphi_ts shape: {phi_ts.shape}") # 
@@ -254,8 +369,7 @@ sbdr.print_pytree_shapes(aux)
 """---------------------"""
 
 
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+
 
 # Create a plotly figure with subplots and a single slider
 # The slider slides over the time axis (i.e., first dimension in this case) of phi_ts
@@ -268,7 +382,7 @@ fig.update_layout(height=600, width=1000)
 # Add heatmap to the left subplot
 fig.add_trace(
     go.Heatmap(
-        z=phi_ts[0].reshape(28, 28),
+        z=phi_ts[0].reshape(28, 28)[::-1],
         colorscale="plasma",
         showscale=False,
         colorbar=dict(
@@ -298,7 +412,7 @@ steps = []
 for i in range(phi_ts.shape[0]):
     step = dict(
         method="update",
-        args=[{"z": phi_ts[i].reshape(28, 28)}, {"title": f"Time step {i}"}],
+        args=[{"z": phi_ts[i].reshape(28, 28)[::-1]}, {"title": f"Time step {i}"}],
         label=f"Time step {i}",
     )
     steps.append(step)

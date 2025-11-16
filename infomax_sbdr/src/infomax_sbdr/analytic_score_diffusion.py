@@ -172,3 +172,73 @@ def diffuse_with_subsets(
     )
 
     return trajectory, statistics
+
+
+@partial(jit, static_argnums=(2,))
+def topk_centroids(xs, cs, k):
+    # return the k centroid of cs closest to x
+    # xs : (*batch_dims, features)
+    # cs : (*batch_dims, n_centers, features)
+
+    ds_squared = ((xs[..., None, :]-cs)**2).sum(-1)
+    idx_topk = jax.lax.top_k(-ds_squared, k=k)[1]
+
+    cs_topk = cs[..., idx_topk, :]
+    ds_topk = np.sqrt(ds_squared[..., idx_topk])
+
+    # return also a aux with a k-hot encoding of the centroids, shape (*batch_dims, n_centers)
+    z = np.zeros((*xs.shape[:-1], cs.shape[-2]), dtype=np.float32)
+    z = z.at[..., idx_topk].set(1.0)
+
+    aux = {
+        "idx_topk": idx_topk,
+        "d_topk": ds_topk,
+        "z": z,
+    }
+    return cs_topk, aux
+
+
+def diffuse_topk(
+    key: jax.random.PRNGKey,
+    phi_T: np.ndarray,
+    ks: np.ndarray,
+    T_max: float = 1.0,
+    num_steps: int = 100,
+    topk: int = 10,
+):
+    """
+    Generate samples using subset-based ideal score machine, computing an analytic score function
+    from the given points (ks).
+
+    Args:
+        key: Random key
+        ks: Array of shape (*batch_dims, features), points to use to compute the analytic score function
+        num_steps: Number of diffusion steps
+        T_max: Maximum diffusion time
+
+    Returns:
+        - Trajectory: array of shape (*batch_dims, num_steps+1, features)
+        - Statistics: list of stat dictionaries for each step
+    """
+
+    # Time discretization
+    dt = T_max / num_steps
+    times = np.linspace(T_max, 0, num_steps + 1)
+
+    # Define a function to scan over time with jax.lax.scan
+    def f_scan(carry, input):
+        phi_t = carry # (*batch_dims, features)
+        t = input
+        # COmpute the closest centers
+        cs_topk, _ = topk_centroids(phi_t, ks, topk)
+        phi_t, stats = reverse_diffusion_step(phi_t, cs_topk, t, dt)
+        return phi_t, (phi_t, stats)
+
+    # Scan over time
+    phi_0, (trajectory, statistics) = jax.lax.scan(
+        f_scan,
+        phi_T,
+        times,
+    )
+
+    return trajectory, statistics
