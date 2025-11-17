@@ -16,7 +16,7 @@ class NeuralGas(nn.Module):
 
     def setup(self):
 
-        self.lambda_0 = self.n_units * 0.5
+        self.lambda_0 = self.n_units * 1.0
 
         # the parameter is the position of the centroid associated to each unit
         self.c = self.param(
@@ -58,6 +58,29 @@ class NeuralGas(nn.Module):
         lam = self.lambda_0 * (self.lambda_f/self.lambda_0)**t
         return {"eps":eps, "lam":lam}
     
+    # def compute_dc(self, x, out, t):
+    #     """https://en.wikipedia.org/wiki/Neural_gas#Algorithm"""
+
+    #     # get training parameters from schedule, given the current time $t \in [0, 1]$
+    #     el = self.param_schedule(t)
+    #     eps = el["eps"]
+    #     lam = el["lam"]
+
+    #     # Compute updates to the parameters
+    #     ks = out["k"]
+    #     dc = eps * (np.exp(-ks/lam)[..., None]) * (x[..., None, :] - self.c)
+        
+    #     # print(ks[:3])
+    #     # print(dc.shape)
+    #     # exit()
+
+    #     # Sum of all updates on all batch dimensions
+    #     dc = dc.mean(axis=0)
+
+    #     return {
+    #         "c": dc
+    #     }
+    
     def compute_dc(self, x, out, t):
         """https://en.wikipedia.org/wiki/Neural_gas#Algorithm"""
 
@@ -66,20 +89,24 @@ class NeuralGas(nn.Module):
         eps = el["eps"]
         lam = el["lam"]
 
-        # Compute updates to the parameters
-        ks = out["k"]
-        dc = eps * (np.exp(-ks/lam)[..., None]) * (x[..., None, :] - self.c)
+        # Get distances
+        d = out["d"]  # shape: (batch, n_units)
         
-        # print(ks[:3])
-        # print(dc.shape)
-        # exit()
+        # Compute rank of each centroid for each sample
+        # ranks[i, j] = rank of centroid j for sample i (0 = closest, n_units-1 = farthest)
+        ranks = np.argsort(np.argsort(d, axis=-1), axis=-1)
+        
+        # Compute neighborhood function based on ranks
+        h = np.exp(-ranks / lam)  # shape: (batch, n_units)
+        
+        # Compute updates for all centroids
+        # dc[i, j, :] = update for centroid j from sample i
+        dc = eps * h[..., None] * (x[..., None, :] - self.c)  # shape: (batch, n_units, in_features)
+        
+        # Average over all batch dimensions
+        dc = dc.mean(axis=0)  # shape: (n_units, in_features)
 
-        # Sum of all updates on all batch dimensions
-        dc = dc.mean(axis=0)
-
-        return {
-            "c": dc
-        }
+        return {"c": dc}
         
     
     def compute_dparams(self, x, out, t):

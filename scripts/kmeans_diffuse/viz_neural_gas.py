@@ -5,7 +5,7 @@ import argparse
 
 default_model = "neural_gas"
 default_number = "1"
-default_cuda = "1"
+default_cuda = "2"
 
 # base folder
 base_folder = os.path.join(
@@ -333,8 +333,6 @@ key = jax.random.key(model_config["model"]["seed"])
 xs, labels = next(iter(dataloader))
 outs = forward_jitted(variables, xs, key)
 
-print(outs["k"][:, :10])
-exit()
 
 history_test = {k : [] for k in outs.keys()}
 
@@ -386,7 +384,7 @@ fig.add_trace(
 
 fig.show()
 
-exit()
+
 
 """---------------------"""
 """ Plot the centroids activated by some data point """
