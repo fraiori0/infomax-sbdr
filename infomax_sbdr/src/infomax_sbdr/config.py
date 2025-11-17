@@ -11,6 +11,7 @@ import infomax_sbdr.antihebbian_recurrent_modules as rec_ah
 import infomax_sbdr.antihebbian_xor_modules as xor_ah
 import infomax_sbdr.antihebbian_td_modules as td_ah
 import infomax_sbdr.antihebbian_band_modules as band_ah
+import infomax_sbdr.neural_gas as neural_gas
 
 
 """
@@ -69,6 +70,11 @@ config_ah_module_dict = {
     "AntiHebbianXORModule": xor_ah.AntiHebbianXORModule,
     "AntiHebbianTDModule": td_ah.AntiHebbianTDModule,
     "AntiHebbianBandModule": band_ah.AntiHebbianBandModule,
+}
+
+
+config_centroid_modules_dict = {
+    "NeuralGas": neural_gas.NeuralGas
 }
 
 

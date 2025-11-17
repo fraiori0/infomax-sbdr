@@ -144,7 +144,7 @@ def diffuse_with_subsets(
 
     Args:
         key: Random key
-        ks: Array of shape (*batch_dims, features), points to use to compute the analytic score function
+        ks: Array of shape (*batch_dims, features), points element along the last axis of the array,  to use to compute the analytic score function
         num_steps: Number of diffusion steps
         T_max: Maximum diffusion time
 
@@ -184,15 +184,41 @@ def topk_centroids(xs, cs, k):
     idx_topk = jax.lax.top_k(-ds_squared, k=k)[1]
 
     cs_topk = cs[..., idx_topk, :]
-    ds_topk = np.sqrt(ds_squared[..., idx_topk])
 
     # return also a aux with a k-hot encoding of the centroids, shape (*batch_dims, n_centers)
     z = np.zeros((*xs.shape[:-1], cs.shape[-2]), dtype=np.float32)
-    z = z.at[..., idx_topk].set(1.0)
+    z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
 
     aux = {
-        "idx_topk": idx_topk,
-        "d_topk": ds_topk,
+        "topk_i": idx_topk,
+        "d": np.sqrt(ds_squared),
+        "z": z,
+    }
+    return cs_topk, aux
+
+
+@partial(jit, static_argnums=(2,))
+def topk_centroids_nomax(xs, cs, k):
+    # return the k centroid of cs closest to x, but without the actual closest one
+    # xs : (*batch_dims, features)
+    # cs : (*batch_dims, n_centers, features)
+
+    ds_squared = ((xs[..., None, :]-cs)**2).sum(-1)
+    # note, argsort sort by ascending order, so the first k element are the lowest one (i.e., the closest)
+    idx_topk = np.argsort(ds_squared, axis=-1)[..., :k]
+    # remove the index of the closest center
+    idx_topk = idx_topk[..., 1:]
+
+
+    cs_topk = cs[..., idx_topk, :]
+
+    # return also a aux with a k-hot encoding of the centroids, shape (*batch_dims, n_centers)
+    z = np.zeros((*xs.shape[:-1], cs.shape[-2]), dtype=np.float32)
+    z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
+
+    aux = {
+        "topk_i": idx_topk,
+        "d": np.sqrt(ds_squared),
         "z": z,
     }
     return cs_topk, aux
@@ -229,8 +255,8 @@ def diffuse_topk(
     def f_scan(carry, input):
         phi_t = carry # (*batch_dims, features)
         t = input
-        # COmpute the closest centers
-        cs_topk, _ = topk_centroids(phi_t, ks, topk)
+        # Compute the closest centers
+        cs_topk, _ = topk_centroids_nomax(phi_t, ks, topk)
         phi_t, stats = reverse_diffusion_step(phi_t, cs_topk, t, dt)
         return phi_t, (phi_t, stats)
 
