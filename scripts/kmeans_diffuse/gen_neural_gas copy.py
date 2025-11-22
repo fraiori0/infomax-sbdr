@@ -323,239 +323,104 @@ variables = state["variables"]
 print(f"\tLast step: {LAST_STEP}")
 
 
+
 """---------------------"""
-""" Encode all test data """
+""" Analytic Diffusion Model """
 """---------------------"""
 
-print("\nEncoding all test data")
+print("\nTesting analytic diffusion")
 
 key = jax.random.key(model_config["model"]["seed"])
 xs, labels = next(iter(dataloader))
-outs = forward_jitted(variables, xs, key)
+
+# Test the functions related to analytic score diffusion
+
+ks = state["variables"]["params"]["c"].copy()
+t0 = 0.1
+phi_T = jax.random.truncated_normal(key, -1.0, 1.0, ks.shape[-1])
+alpha_bar_t = sbdr.analytic_score_diffusion.cosine_schedule(t0)
+
+print(f"\tks shape: {ks.shape}")
+print(f"\tphi_T shape: {phi_T.shape}")
+print(f"\tt0 : {t0}")
+print(f"\talpha_bar_t: {alpha_bar_t}")
 
 
-history_test = {k : [] for k in outs.keys()}
-history_test["x"] = []
+key = jax.random.key(70)
 
-for xs, labels in tqdm(dataloader_test, total=len(dataloader_test)):
-    key, _ = jax.random.split(key)
-    outs = forward_jitted(variables, xs, key)
+phi_ts, aux = sbdr.analytic_score_diffusion.diffuse_topk(
+    key,
+    phi_T,
+    ks,
+    T_max=1.0,
+    num_steps=100,
+    topk=10,
+)
 
-    for k in outs.keys():
-        history_test[k].append(outs[k])
-    history_test["x"].append(xs)
+print(f"\n\tphi_ts shape: {phi_ts.shape}") # 
+sbdr.print_pytree_shapes(aux)
 
-# convert to numpy arrays
-print("History shapes:")
-for k in history_test.keys():
-    history_test[k] = np.concatenate(history_test[k], axis=0)
-    print(f"\t{k} : {history_test[k].shape}")
 
 """---------------------"""
-""" Plot utils """
+""" Nicely plot the diffusion process """
 """---------------------"""
 
-def point_to_img(x):
-    # Reshape
-    x = x.reshape((*x.shape[:-1], 28, 28))
-    # Rescale
-    mu = np.array(model_config["dataset"]["transform"]["normalization"]["mean"])
-    sigma = np.array(model_config["dataset"]["transform"]["normalization"]["std"])
-    x = (x * sigma) + mu
-    # Flip vertical axis
-    x = x[..., ::-1, :]#, :]
-    # Convert to unit8 in range [0, 255]
-    x = np.clip((x * 255), 0, 255).astype(np.uint8)
-    # Return as original numpy array
-    return onp.array(x)
-    
+# Create a plotly figure with subplots and a single slider
+# The slider slides over the time axis (i.e., first dimension in this case) of phi_ts
+# the first subplot shows the time series of phi_ts[i], reshaped to (28,28) plotted as a heatmap, and is updated by the slider
+# the second subplot contains a scatter plot of all the (scalar) values in the aux dictionary over time, and is not updated by the slider
 
-"""---------------------"""
-""" Plot activation stats and covariance matrix """
-"""---------------------"""
+fig = make_subplots(rows=1, cols=2, subplot_titles=["Time series of phi_ts", "Aux values over time"])
+fig.update_layout(height=600, width=1000)
 
-print("\nPlot activation stats and covariance matrix")
-
-if False:
-    cov_test = np.cov(history_test["z"].T)
-    avg_per_unit_test = history_test["z"].mean(axis=0)
-
-    fig = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=(
-            "Activation stats",
-            "Covariance matrix",
+# Add heatmap to the left subplot
+fig.add_trace(
+    go.Heatmap(
+        z=phi_ts[0].reshape(28, 28)[::-1],
+        colorscale="plasma",
+        showscale=False,
+        colorbar=dict(
+            title="Value",
+            xanchor="left",
+            x=0.05
         )
-    )
+    ),
+    row=1, col=1
+)
 
+# Add scatter plot to the right subplot
+for i, (k, v) in enumerate(aux.items()):
     fig.add_trace(
-        go.Histogram(
-            x=avg_per_unit_test,
-            nbinsx=100,
-        ),
-        row=1, col=1
-    )
-
-    fig.add_trace(
-        go.Heatmap(
-            z=cov_test,
+        go.Scatter(
+            x=np.arange(v.shape[0]),
+            y=v,
+            mode="lines",
+            name=k,
+            showlegend=True,
         ),
         row=1, col=2
     )
 
-    fig.show()
-
-
-"""---------------------"""
-""" Plot the centroids activated by some data point """
-"""---------------------"""
-
-if False:
-
-    print("\nPlot the centroids activated by some data point")
-
-    xs, labels = next(iter(dataloader))
-    key = jax.random.key(model_config["model"]["seed"])
-
-    outs = forward_jitted(variables, xs, key)
-
-    # For each sample, take the points corresponding to the k closest centroids
-
-    Cs = variables["params"]["c"]
-    idx_topk = outs["i_sort"][..., :model_config["model"]["kwargs"]["topk"]]
-
-    cs_topk = Cs[idx_topk, :]
-
-    print(f"\tTopk shape: {cs_topk.shape}")
-
-
-    # Plot in a Figure
-    n_plots = model_config["model"]["kwargs"]["topk"] + 1
-    n_cols = 5
-    n_rows = n_plots // n_cols + (n_plots % n_cols > 0)
-
-    for i, (x, cs_x) in enumerate(zip(xs, cs_topk)):
-
-        if i>=3:
-            break
-
-        x_img = point_to_img(x)
-        cs_x_img = point_to_img(cs_x)
-
-        fig = make_subplots(
-            rows=n_rows, cols=n_cols,
-            subplot_titles=(
-                ["Input"] +
-                [f"Unit {i}" for i in range(model_config["model"]["kwargs"]["topk"])]
-            ),
-            horizontal_spacing=0.1,
-            vertical_spacing=0.15,
-        )
-
-        # Add the input in the first place
-        fig.add_trace(
-            go.Heatmap(
-                z=x_img,
-                colorscale="gray",
-                zmin=0, zmax=255,
-            ),
-            row=1, col=1,
-        )
-
-        # Add the rest of the units
-        for j, cs_x_j in enumerate(cs_x_img):
-            fig.add_trace(
-                go.Heatmap(
-                    z=cs_x_j,
-                    colorscale="gray",
-                    zmin=0, zmax=255,
-                ),
-                row=(j+1) // n_cols + 1, col=(j+1) % n_cols + 1,
-            )
-
-        fig.update_layout(
-            # width=800,
-            # height=600,
-            template="plotly_white",
-        )
-        fig.show()
-        
-
-
-"""---------------------"""
-""" Train a linear regressor for reconstruction """
-"""---------------------"""
-
-# Use scikit learn to train a multi-output linear regressor model for reconstruction
-
-from sklearn.linear_model import LinearRegression
-
-print("\nTrain a linear regressor for reconstruction")
-
-lin_model = LinearRegression(n_jobs = 7)
-
-x_regr = onp.array(history_test["z"])
-y_regr = onp.array(history_test["x"])
-
-lin_model.fit(x_regr, y_regr)
-y_pred = lin_model.predict(x_regr)
-
-print(f"Reconstruction R2 score: {lin_model.score(x_regr, y_regr)}")
-
-# Plot some example of original input, reconstruction, and difference
-# cols with different samples
-n_cols = 5
-# rows with original, reconstruction, difference
-n_rows = 3
-n_plots = n_cols * n_rows
-offset_plot = 0
-
-fig = make_subplots(
-    rows=n_rows, cols=n_cols,
-    horizontal_spacing=0.1,
-    vertical_spacing=0.15,
-)
-
-for i, (x_original, x_pred) in enumerate(zip(
-    y_regr[offset_plot:offset_plot+n_plots],
-    y_pred[offset_plot:offset_plot+n_plots]
-)):
-    x_img = point_to_img(x_original)
-    x_regr_img = point_to_img(x_pred)
-
-    fig.add_trace(
-        go.Heatmap(
-            z=x_img,
-            colorscale="gray",
-            zmin=0, zmax=255,
-            showscale=False,
-        ),
-        row=1, col=(i+1) % n_cols + 1,
+# Create slider with the steps of phi_ts (only in the first subplot)
+steps = []
+for i in range(phi_ts.shape[0]):
+    step = dict(
+        method="update",
+        args=[{"z": phi_ts[i].reshape(28, 28)[::-1]}, {"title": f"Time step {i}"}],
+        label=f"Time step {i}",
     )
+    steps.append(step)
 
-    fig.add_trace(
-        go.Heatmap(
-            z=x_regr_img,
-            colorscale="gray",
-            zmin=0, zmax=255,
-            showscale=False,
-        ),
-        row=2, col=(i+1) % n_cols + 1,
-    )
+sliders = [dict(
+    active=0,
+    currentvalue={"prefix": "Time step: "},
+    pad={"t": 50},
+    steps=steps,
+)]
 
-    fig.add_trace(
-        go.Heatmap(
-            z=np.abs(x_img.astype(onp.float32) - x_regr_img.astype(onp.float32)),
-            colorscale="viridis",
-            zmin=-255, zmax=255,
-        ),
-        row=3, col=(i+1) % n_cols + 1,
-    )
 
 fig.update_layout(
-    # width=800,
-    # height=600,
-    template="plotly_white",
+    sliders=sliders
 )
+
 fig.show()

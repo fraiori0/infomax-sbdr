@@ -32,21 +32,26 @@ class NeuralGas(nn.Module):
         # Compute the distance from each centroid
         d = np.sqrt(((x[..., None, :] - self.c)**2).sum(-1))
 
-        # Compute the order of each unit (the closest is 0, the most distant is self.n_units-1)
-        k = np.argsort(d, axis=-1)
+        # Compute the rank of each centroid (0 for the closest, self.n_unit-1 for farthest)
+        i_sort = np.argsort(d, axis=-1)
+        k = np.argsort(i_sort, axis=-1)
 
         # print("\n<<<<<<<<.>>>>>>>>>")
         # print(k[:5])
 
-        # Activate the k closest unit to produce a k-hot encoding
-        idx_topk = k[..., :self.topk]
+        # # # Activate the k closest unit
+        idx_topk = i_sort[..., :self.topk]
         z = np.zeros((*x.shape[:-1], self.n_units), dtype=np.float32)
-        z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
-
+        # # k-hot encoding
+        # z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
+        # Instead, use the rank rescaled in 0-1
+        z = np.put_along_axis(z, idx_topk, (1.0/np.arange(1.0, self.topk+1)), axis=-1, inplace=False)
+    
         # print(z[:5])
 
         return {
             "d": d,
+            "i_sort": i_sort,
             "k": k,
             "z": z,
         }
@@ -94,10 +99,10 @@ class NeuralGas(nn.Module):
         
         # Compute rank of each centroid for each sample
         # ranks[i, j] = rank of centroid j for sample i (0 = closest, n_units-1 = farthest)
-        ranks = np.argsort(np.argsort(d, axis=-1), axis=-1)
+        k = out["k"] # ranks = np.argsort(np.argsort(d, axis=-1), axis=-1)
         
         # Compute neighborhood function based on ranks
-        h = np.exp(-ranks / lam)  # shape: (batch, n_units)
+        h = np.exp(-k / lam)  # shape: (batch, n_units)
         
         # Compute updates for all centroids
         # dc[i, j, :] = update for centroid j from sample i

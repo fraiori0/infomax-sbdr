@@ -9,7 +9,7 @@ in_features = 784
 epsilon_0 = 0.3
 epsilon_f = 0.01
 lambda_f = 0.1
-topk = 15
+topk = 20
 
 [dataset.transform.normalization]
 mean = [0.2860]
