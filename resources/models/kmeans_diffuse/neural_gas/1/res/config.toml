@@ -4,12 +4,12 @@ seed = 39
 # activation = "leaky_relu"
 # out_activation = "sigmoid"
 [model.kwargs]
-n_units = 256
+n_units = 128
 in_features = 784
 epsilon_0 = 0.5
-epsilon_f = 0.05
+epsilon_f = 0.02
 lambda_f = 0.01
-topk = 20
+topk = 5
 
 [dataset.transform.normalization]
 mean = [0.2860]
@@ -29,8 +29,8 @@ saturation = 0.15
 hue = 0.15
 
 [training]
-epochs = 5
-batch_size = 64
+epochs = 10
+batch_size = 16
 
 [training.checkpoint]
 save = true
