@@ -47,13 +47,15 @@ class NeuralGas(nn.Module):
         # Instead, use the rank rescaled in 0-1
         z = np.put_along_axis(z, idx_topk, (1.0/np.arange(1.0, self.topk+1)), axis=-1, inplace=False)
     
-        # print(z[:5])
+        # Return also the value of the single closest centroid
+        x_c = self.c[i_sort[..., 0]]
 
         return {
             "d": d,
             "i_sort": i_sort,
             "k": k,
             "z": z,
+            "x_c": x_c
         }
 
     
