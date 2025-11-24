@@ -9,6 +9,7 @@ in_features = 784
 epsilon_0 = 0.5
 epsilon_f = 0.01
 lambda_f = 0.1
+p = 0.5
 topk = 15
 
 [dataset.transform.normalization]
@@ -29,7 +30,7 @@ saturation = 0.15
 hue = 0.15
 
 [training]
-epochs = 10
+epochs = 20
 batch_size = 32
 
 [training.checkpoint]
