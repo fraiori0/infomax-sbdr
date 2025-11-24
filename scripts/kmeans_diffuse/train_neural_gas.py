@@ -472,10 +472,17 @@ try:
     outs = forward_jitted(state["variables"], xs_original)
     # convert to images
     activation_img = activation_to_img(outs["z"])
-    for i in range(activation_img.shape[0]):
+    centroid_img = activation_to_img(outs["x_c"])
+    for i in range(min(30, activation_img.shape[0])):
         writer.add_image(
             f"activation/img/{i+1}",
             activation_img[i],
+            global_step=0,
+            dataformats="HWC",
+        )
+        writer.add_image(
+            f"centroid/img/{i+1}",
+            centroid_img[i],
             global_step=0,
             dataformats="HWC",
         )
@@ -557,10 +564,17 @@ try:
         outs = forward_jitted(state["variables"], xs_original)
         # convert to images
         activation_img = activation_to_img(outs["z"])
-        for i in range(activation_img.shape[0]):
+        centroid_img = activation_to_img(outs["x_c"])
+        for i in range(min(30, activation_img.shape[0])):
             writer.add_image(
                 f"activation/img/{i+1}",
                 activation_img[i],
+                global_step=epoch_step,
+                dataformats="HWC",
+            )
+            writer.add_image(
+                f"centroid/img/{i+1}",
+                centroid_img[i],
                 global_step=epoch_step,
                 dataformats="HWC",
             )

@@ -2,6 +2,7 @@ import jax
 import jax.numpy as np
 import flax.linen as nn
 from functools import partial
+from infomax_sbdr import initializers as my_inits
 
 
 class NeuralGas(nn.Module):    
@@ -26,18 +27,18 @@ class NeuralGas(nn.Module):
             np.float32,
         )
 
+    def compute_distances(self, x):
+        return np.sqrt(((x[..., None, :] - self.c)**2).sum(-1))
+
     
     def __call__(self, x):
 
         # Compute the distance from each centroid
-        d = np.sqrt(((x[..., None, :] - self.c)**2).sum(-1))
+        d = self.compute_distances(x)
 
         # Compute the rank of each centroid (0 for the closest, self.n_unit-1 for farthest)
         i_sort = np.argsort(d, axis=-1)
         k = np.argsort(i_sort, axis=-1)
-
-        # print("\n<<<<<<<<.>>>>>>>>>")
-        # print(k[:5])
 
         # # # Activate the k closest unit
         idx_topk = i_sort[..., :self.topk]
@@ -64,29 +65,7 @@ class NeuralGas(nn.Module):
         eps = self.epsilon_0 * (self.epsilon_f/self.epsilon_0)**t
         lam = self.lambda_0 * (self.lambda_f/self.lambda_0)**t
         return {"eps":eps, "lam":lam}
-    
-    # def compute_dc(self, x, out, t):
-    #     """https://en.wikipedia.org/wiki/Neural_gas#Algorithm"""
 
-    #     # get training parameters from schedule, given the current time $t \in [0, 1]$
-    #     el = self.param_schedule(t)
-    #     eps = el["eps"]
-    #     lam = el["lam"]
-
-    #     # Compute updates to the parameters
-    #     ks = out["k"]
-    #     dc = eps * (np.exp(-ks/lam)[..., None]) * (x[..., None, :] - self.c)
-        
-    #     # print(ks[:3])
-    #     # print(dc.shape)
-    #     # exit()
-
-    #     # Sum of all updates on all batch dimensions
-    #     dc = dc.mean(axis=0)
-
-    #     return {
-    #         "c": dc
-    #     }
     
     def compute_dc(self, x, out, t):
         """https://en.wikipedia.org/wiki/Neural_gas#Algorithm"""
@@ -131,27 +110,44 @@ class NeuralGas(nn.Module):
         params["params"]["c"] = params["params"]["c"] + dparams["params"]["c"]
 
         return params, dparams
+    
 
-    def activate_topk(self, x, k):
-        # Encode inputs by activating the units corresponding to the k closest centroids
-        # xs : (*batch_dims, features)
-        # k : int
-        # coimpute distance and take centers
-        ds = self(x)
-        cs = self.c
-        # take the closest topk centers (note, we do topk on -ds)
-        idx_topk = jax.lax.top_k(-ds, k=k)[1]
-        cs_topk = cs[..., idx_topk, :]
+class MaskedNeuralGas(NeuralGas):    
+    """Implementation of a Neural Gas model with binary-masked connections"""
 
-        # return also a k-hot encoding of the centroids, of shape (*batch_dims, n_centers)
-        # with the topk closest unit (for each sample) set to 1, and 0 everywhere else
-        z = np.zeros((*x.shape[:-1], self.n_units), dtype=np.float32)
-        z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
+    p: float = 0.5
 
-        outs = {
-            "topk_c": cs_topk,
-            "topk_i": idx_topk,
-            "d": ds,
-            "z": z,
-        }
-        return outs
+    def setup(self):
+
+        super().setup()
+
+        # Random mask for subsampling of input: centroids are not connected to all input features
+        self.mask = self.param(
+            "mask",
+            my_inits.bernoulli_uniform(p=self.p, scale=1.0, dtype=np.float32),
+            (self.n_units, self.in_features),
+            np.float32,
+        )
+
+    
+    def compute_distances(self, x):
+        # masked difference between input and centroids
+        diff_masked = self.mask * (x[..., None, :] - self.c)
+        # normalizaton by number of dimensions left after masking
+        diff_masked = diff_masked/np.sqrt(self.mask.sum(-1, keepdims=True))
+        d = np.sqrt((diff_masked**2).sum(-1))
+        return d
+        
+
+    def update_params(self, params, x, out, t):
+        # Here we perform a masked update, where masked components of each centroid are kept at 0
+        # In any case, the masked components do not contribute to the distance computation
+
+        dparams =  self.compute_dparams(x, out, t)
+
+        params["params"]["c"] = params["params"]["c"] + dparams["params"]["c"]
+
+        # Apply mask
+        params["params"]["c"] = params["params"]["c"] * self.mask
+
+        return params, dparams

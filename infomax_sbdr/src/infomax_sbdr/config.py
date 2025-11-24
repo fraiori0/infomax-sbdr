@@ -74,7 +74,8 @@ config_ah_module_dict = {
 
 
 config_centroid_modules_dict = {
-    "NeuralGas": neural_gas.NeuralGas
+    "NeuralGas": neural_gas.NeuralGas,
+    "MaskedNeuralGas": neural_gas.MaskedNeuralGas,
 }
 
 

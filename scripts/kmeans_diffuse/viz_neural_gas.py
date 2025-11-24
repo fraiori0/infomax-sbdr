@@ -324,6 +324,37 @@ print(f"\tLast step: {LAST_STEP}")
 
 
 """---------------------"""
+""" Encode all train data """
+"""---------------------"""
+
+print("\nEncoding all train data")
+
+key = jax.random.key(model_config["model"]["seed"])
+xs, labels = next(iter(dataloader))
+outs = forward_jitted(variables, xs, key)
+
+history_train = {k : [] for k in outs.keys()}
+history_train["x"] = []
+history_train["label_cat"] = []
+
+for xs, labels in tqdm(dataloader, total=len(dataloader)):
+    key, _ = jax.random.split(key)
+    outs = forward_jitted(variables, xs, key)
+
+    for k in outs.keys():
+        history_train[k].append(outs[k])
+    history_train["x"].append(xs)
+    history_train["label_cat"].append(np.argmax(labels, axis=-1))
+
+# convert to numpy arrays
+print("  History shapes:")
+for k in history_train.keys():
+    history_train[k] = np.concatenate(history_train[k], axis=0)
+    print(f"\t{k} : {history_train[k].shape}")
+
+
+
+"""---------------------"""
 """ Encode all test data """
 """---------------------"""
 
@@ -336,6 +367,7 @@ outs = forward_jitted(variables, xs, key)
 
 history_test = {k : [] for k in outs.keys()}
 history_test["x"] = []
+history_test["label_cat"] = []
 
 for xs, labels in tqdm(dataloader_test, total=len(dataloader_test)):
     key, _ = jax.random.split(key)
@@ -344,9 +376,10 @@ for xs, labels in tqdm(dataloader_test, total=len(dataloader_test)):
     for k in outs.keys():
         history_test[k].append(outs[k])
     history_test["x"].append(xs)
+    history_test["label_cat"].append(np.argmax(labels, axis=-1))
 
 # convert to numpy arrays
-print("History shapes:")
+print("  History shapes:")
 for k in history_test.keys():
     history_test[k] = np.concatenate(history_test[k], axis=0)
     print(f"\t{k} : {history_test[k].shape}")
@@ -493,69 +526,101 @@ from sklearn.linear_model import LinearRegression
 
 print("\nTrain a linear regressor for reconstruction")
 
-lin_model = LinearRegression(n_jobs = 7)
+if False:
+    lin_model = LinearRegression(n_jobs = 7)
 
-x_regr = onp.array(history_test["z"])
-y_regr = onp.array(history_test["x"])
+    x_regr = onp.array(history_test["z"])
+    y_regr = onp.array(history_test["x"])
 
-lin_model.fit(x_regr, y_regr)
-y_pred = lin_model.predict(x_regr)
+    lin_model.fit(x_regr, y_regr)
+    y_pred = lin_model.predict(x_regr)
 
-print(f"Reconstruction R2 score: {lin_model.score(x_regr, y_regr)}")
+    print(f"Reconstruction R2 score: {lin_model.score(x_regr, y_regr)}")
 
-# Plot some example of original input, reconstruction, and difference
-# cols with different samples
-n_cols = 5
-# rows with original, reconstruction, difference
-n_rows = 3
-n_plots = n_cols * n_rows
-offset_plot = 0
+    # Plot some example of original input, reconstruction, and difference
+    # cols with different samples
+    n_cols = 5
+    # rows with original, reconstruction, difference
+    n_rows = 3
+    n_plots = n_cols * n_rows
+    offset_plot = 0
 
-fig = make_subplots(
-    rows=n_rows, cols=n_cols,
-    horizontal_spacing=0.1,
-    vertical_spacing=0.15,
-)
-
-for i, (x_original, x_pred) in enumerate(zip(
-    y_regr[offset_plot:offset_plot+n_plots],
-    y_pred[offset_plot:offset_plot+n_plots]
-)):
-    x_img = point_to_img(x_original)
-    x_regr_img = point_to_img(x_pred)
-
-    fig.add_trace(
-        go.Heatmap(
-            z=x_img,
-            colorscale="gray",
-            zmin=0, zmax=255,
-            showscale=False,
-        ),
-        row=1, col=(i+1) % n_cols + 1,
+    fig = make_subplots(
+        rows=n_rows, cols=n_cols,
+        horizontal_spacing=0.1,
+        vertical_spacing=0.15,
     )
 
-    fig.add_trace(
-        go.Heatmap(
-            z=x_regr_img,
-            colorscale="gray",
-            zmin=0, zmax=255,
-            showscale=False,
-        ),
-        row=2, col=(i+1) % n_cols + 1,
+    for i, (x_original, x_pred) in enumerate(zip(
+        y_regr[offset_plot:offset_plot+n_plots],
+        y_pred[offset_plot:offset_plot+n_plots]
+    )):
+        x_img = point_to_img(x_original)
+        x_regr_img = point_to_img(x_pred)
+
+        fig.add_trace(
+            go.Heatmap(
+                z=x_img,
+                colorscale="gray",
+                zmin=0, zmax=255,
+                showscale=False,
+            ),
+            row=1, col=(i+1) % n_cols + 1,
+        )
+
+        fig.add_trace(
+            go.Heatmap(
+                z=x_regr_img,
+                colorscale="gray",
+                zmin=0, zmax=255,
+                showscale=False,
+            ),
+            row=2, col=(i+1) % n_cols + 1,
+        )
+
+        fig.add_trace(
+            go.Heatmap(
+                z=np.abs(x_img.astype(onp.float32) - x_regr_img.astype(onp.float32)),
+                colorscale="viridis",
+                zmin=-255, zmax=255,
+            ),
+            row=3, col=(i+1) % n_cols + 1,
+        )
+
+    fig.update_layout(
+        # width=800,
+        # height=600,
+        template="plotly_white",
+    )
+    fig.show()
+
+
+
+"""---------------------"""
+""" Train a linear classifier using logistic regression """
+"""---------------------"""
+
+from sklearn.linear_model import LogisticRegression
+
+if True:
+
+    lin_class_model = LogisticRegression(
+        random_state=0,
+        tol=1e-4,
+        multi_class="multinomial",
+        C=1,
+        # penalty="l1",
+        # solver="saga",
+        n_jobs=7,
     )
 
-    fig.add_trace(
-        go.Heatmap(
-            z=np.abs(x_img.astype(onp.float32) - x_regr_img.astype(onp.float32)),
-            colorscale="viridis",
-            zmin=-255, zmax=255,
-        ),
-        row=3, col=(i+1) % n_cols + 1,
-    )
+    x_regr_train = onp.array(history_train["z"])
+    y_regr_train = onp.array(history_train["label_cat"])
+    x_regr_test = onp.array(history_test["z"])
+    y_regr_test = onp.array(history_test["label_cat"])
 
-fig.update_layout(
-    # width=800,
-    # height=600,
-    template="plotly_white",
-)
-fig.show()
+    lin_class_model.fit(x_regr_train, y_regr_train)
+
+    print(f"Classification accuracy:")
+    print(f"\ttrain:  {lin_class_model.score(x_regr_train, y_regr_train)}")
+    print(f"\ttest:   {lin_class_model.score(x_regr_test, y_regr_test)}")

@@ -361,6 +361,7 @@ history_test = {
 }
 history_test["x"] = []
 history_test["x_res"] = []
+history_test["label_cat"] = []
 
 for xs, labels in tqdm(dataloader_test, total=len(dataloader_test)):
     key, _ = jax.random.split(key)
@@ -372,6 +373,7 @@ for xs, labels in tqdm(dataloader_test, total=len(dataloader_test)):
         history_test["res"][k].append(outs["res"][k])
     history_test["x"].append(xs)
     history_test["x_res"].append(outs["x_res"])
+    history_test["label_cat"].append(np.argmax(labels, axis=-1))
 
 # convert to numpy arrays
 print("History shapes:")
@@ -518,7 +520,7 @@ if False:
             template="plotly_white",
         )
         fig.show()
-        
+
 
 
 """---------------------"""
@@ -526,74 +528,101 @@ if False:
 """---------------------"""
 
 # Use scikit learn to train a multi-output linear regressor model for reconstruction
-
 from sklearn.linear_model import LinearRegression
 
 print("\nTrain a linear regressor for reconstruction")
 
-lin_model = LinearRegression(n_jobs = 7)
+if False:
+
+    lin_model = LinearRegression(n_jobs = 7)
+
+    x_regr = onp.concatenate((history_test["enc"]["z"], history_test["res"]["z"]), axis=-1)
+    y_regr = onp.array(history_test["x"])
+
+    lin_model.fit(x_regr, y_regr)
+    y_pred = lin_model.predict(x_regr)
+
+    print(f"Reconstruction R2 score: {lin_model.score(x_regr, y_regr)}")
+
+    # Plot some example of original input, reconstruction, and difference
+    # cols with different samples
+    n_cols = 5
+    # rows with original, reconstruction, difference
+    n_rows = 3
+    n_plots = n_cols * n_rows
+    offset_plot = 0
+
+    fig = make_subplots(
+        rows=n_rows, cols=n_cols,
+        horizontal_spacing=0.1,
+        vertical_spacing=0.15,
+    )
+
+    for i, (x_original, x_pred) in enumerate(zip(
+        y_regr[offset_plot:offset_plot+n_plots],
+        y_pred[offset_plot:offset_plot+n_plots]
+    )):
+        x_img = point_to_img(x_original)
+        x_regr_img = point_to_img(x_pred)
+
+        fig.add_trace(
+            go.Heatmap(
+                z=x_img,
+                colorscale="gray",
+                zmin=0, zmax=255,
+                showscale=False,
+            ),
+            row=1, col=(i+1) % n_cols + 1,
+        )
+
+        fig.add_trace(
+            go.Heatmap(
+                z=x_regr_img,
+                colorscale="gray",
+                zmin=0, zmax=255,
+                showscale=False,
+            ),
+            row=2, col=(i+1) % n_cols + 1,
+        )
+
+        fig.add_trace(
+            go.Heatmap(
+                z=np.abs(x_img.astype(onp.float32) - x_regr_img.astype(onp.float32)),
+                colorscale="viridis",
+                zmin=-255, zmax=255,
+            ),
+            row=3, col=(i+1) % n_cols + 1,
+        )
+
+    fig.update_layout(
+        # width=800,
+        # height=600,
+        template="plotly_white",
+    )
+    fig.show()
+
+
+"""---------------------"""
+""" Train a linear classifier using logistic regression """
+"""---------------------"""
+
+from sklearn.linear_model import LogisticRegression
+
+lin_class_model = LogisticRegression(
+    random_state=0,
+    tol=1e-4,
+    multi_class="multinomial",
+    C=1,
+    # penalty="l1",
+    # solver="saga",
+    n_jobs=7,
+)
 
 x_regr = onp.concatenate((history_test["enc"]["z"], history_test["res"]["z"]), axis=-1)
-y_regr = onp.array(history_test["x"])
+y_regr = onp.array(history_test["label_cat"])
 
-lin_model.fit(x_regr, y_regr)
-y_pred = lin_model.predict(x_regr)
 
-print(f"Reconstruction R2 score: {lin_model.score(x_regr, y_regr)}")
+lin_class_model.fit(x_regr, y_regr)
+y_pred = lin_class_model.predict(x_regr)
 
-# Plot some example of original input, reconstruction, and difference
-# cols with different samples
-n_cols = 5
-# rows with original, reconstruction, difference
-n_rows = 3
-n_plots = n_cols * n_rows
-offset_plot = 0
-
-fig = make_subplots(
-    rows=n_rows, cols=n_cols,
-    horizontal_spacing=0.1,
-    vertical_spacing=0.15,
-)
-
-for i, (x_original, x_pred) in enumerate(zip(
-    y_regr[offset_plot:offset_plot+n_plots],
-    y_pred[offset_plot:offset_plot+n_plots]
-)):
-    x_img = point_to_img(x_original)
-    x_regr_img = point_to_img(x_pred)
-
-    fig.add_trace(
-        go.Heatmap(
-            z=x_img,
-            colorscale="gray",
-            zmin=0, zmax=255,
-            showscale=False,
-        ),
-        row=1, col=(i+1) % n_cols + 1,
-    )
-
-    fig.add_trace(
-        go.Heatmap(
-            z=x_regr_img,
-            colorscale="gray",
-            zmin=0, zmax=255,
-            showscale=False,
-        ),
-        row=2, col=(i+1) % n_cols + 1,
-    )
-
-    fig.add_trace(
-        go.Heatmap(
-            z=np.abs(x_img.astype(onp.float32) - x_regr_img.astype(onp.float32)),
-            colorscale="viridis",
-            zmin=-255, zmax=255,
-        ),
-        row=3, col=(i+1) % n_cols + 1,
-    )
-
-fig.update_layout(
-    # width=800,
-    # height=600,
-    template="plotly_white",
-)
-fig.show()
+print(f"Classification accuracy: {lin_class_model.score(x_regr, y_regr)}")
