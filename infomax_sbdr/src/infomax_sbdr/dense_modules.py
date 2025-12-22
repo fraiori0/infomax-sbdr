@@ -159,3 +159,69 @@ class DenseSlabFLO(nn.Module):
         outs = self.layers(x)
         outs["neg_pmi"] = self.negpmi_layers(outs["z"])
         return outs
+    
+class ScaledRBF(nn.Module):
+    n_units : int
+    in_features : int
+    def setup(self,):
+        
+        # Scale
+        self.s = nn.Dense(
+            features=self.n_units,
+            use_bias=False,
+            kernel_init=nn.initializers.ones,
+        )
+
+        # Centroid parameters
+        self.c = nn.Dense(
+            features=self.n_units,
+            use_bias=True,
+            kernel_init=nn.initializers.lecun_normal(),
+        )
+
+    def __call__(self, x):
+
+        # for initialization
+        _ = self.s(x)
+        _ = self.c(x)
+
+        s = self.variables["params"]["s"]["kernel"]
+        s = jax.nn.softplus(s)
+
+        c = self.variables["params"]["c"]["kernel"]
+
+        # compute distances in scaled space
+        diff = (x[..., None] - c)
+        diff = diff * s
+        # use mean instead of sum to account for the distance scale given by the dimensions of the data
+        d_sq = np.mean(diff**2, axis=-2)
+        
+
+        # activate rbf centroids
+        z = np.exp(-d_sq)
+
+        return {"z": z}
+
+class ScaledRBFFLO(ScaledRBF):
+    hid_features_negpmi: Sequence[int]
+    activation_fn: Callable = jax.nn.mish
+    out_activation_fn: Callable = nn.sigmoid
+    use_batchnorm: bool = False
+    use_dropout: bool = False
+    dropout_rate: float = 0.0
+    training: bool = True  # whether in training or eval mode (for dropout/batchnorm)
+
+    def setup(self):
+        super().setup()
+
+        negpmi_layers = []
+        for f in self.hid_features_negpmi:
+            negpmi_layers.append(nn.Dense(features=f))
+            negpmi_layers.append(self.activation_fn)
+        negpmi_layers.append(nn.Dense(features=1))
+        self.negpmi_layers = nn.Sequential(negpmi_layers)
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        outs["neg_pmi"] = self.negpmi_layers(outs["z"])
+        return outs

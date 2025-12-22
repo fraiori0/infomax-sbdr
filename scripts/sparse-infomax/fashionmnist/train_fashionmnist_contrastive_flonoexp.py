@@ -4,7 +4,7 @@ import argparse
 
 
 default_model = "dense_sigmoid_logand"
-default_number = "5slab"
+default_number = "6rbf"
 default_cuda = "1"
 
 # base folder
@@ -692,10 +692,13 @@ pprint(gradients_are_nan)
 """------------------"""
 
 
-def activation_to_img(z):
+def activation_to_img(z, normalize=True):
     # compute width and height to get an approximate square
     n_height = np.sqrt(z.shape[-1]).astype(int)
     n_width = z.shape[-1] // n_height + int(not (z.shape[-1] % n_height) == 0)
+    # normalize min-max in [0, 1]
+    if normalize:
+        z = (z - z.min()) / (z.max() - z.min())
     # pad z with zero if necessary, so we can then reshape the feature dimension (last)
     # to the given width and height
     pad_width = [(0, 0)] * (len(z.shape) - 1)
@@ -721,6 +724,37 @@ writer = SummaryWriter(log_dir=log_folder)
 print("\nTraining")
 
 try:
+
+    # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
+    xs_original, labels_original = next(iter(dataloader_original))
+    # BATCH_NORM - change here
+    # outs, _ = forward_eval_jitted(state["variables"], xs_original)
+    outs = forward_eval_jitted(state["variables"], xs_original)
+    # convert to images
+    activation_img = activation_to_img(outs["z"], normalize=False)
+    cs = state["variables"]["params"]["c"]["kernel"].T
+    ss = jax.nn.softplus(state["variables"]["params"]["s"]["kernel"].T)
+    centroid_img = activation_to_img(cs)
+    scale_image = activation_to_img(ss)
+    for i in range(min(30, activation_img.shape[0])):
+        writer.add_image(
+            f"activation/img/{i+1}",
+            activation_img[i],
+            global_step=0,
+            dataformats="HWC",
+        )
+        writer.add_image(
+            f"centroid/img/{i+1}",
+            centroid_img[i],
+            global_step=0,
+            dataformats="HWC",
+        )
+        writer.add_image(
+            f"scale/img/{i+1}",
+            scale_image[i],
+            global_step=0,
+            dataformats="HWC",
+        )
 
     for epoch in tqdm(range(model_config["training"]["epochs"])):
 
@@ -778,11 +812,11 @@ try:
         # Log epoch stats
         for metric, value in epoch_metrics.items():
             writer.add_scalar(
-                metric + "/train/epoch", value.item(), global_step=epoch_step
+                metric + "/train", value.item(), global_step=epoch_step
             )
         for metric, value in epoch_metrics_val.items():
             writer.add_scalar(
-                metric + "/val/epoch", value.item(), global_step=epoch_step
+                metric + "/val", value.item(), global_step=epoch_step
             )
 
         # Save checkpoint
@@ -799,11 +833,28 @@ try:
         # outs, _ = forward_eval_jitted(state["variables"], xs_original)
         outs = forward_eval_jitted(state["variables"], xs_original)
         # convert to images
-        activation_img = activation_to_img(outs["z"])
-        for i in range(activation_img.shape[0]):
+        activation_img = activation_to_img(outs["z"], normalize=False)
+        cs = state["variables"]["params"]["c"]["kernel"].T
+        ss = jax.nn.softplus(state["variables"]["params"]["s"]["kernel"].T)
+        # cs = cs * ss
+        centroid_img = activation_to_img(cs)
+        scale_image = activation_to_img(ss)
+        for i in range(min(30, activation_img.shape[0])):
             writer.add_image(
                 f"activation/img/{i+1}",
                 activation_img[i],
+                global_step=epoch_step,
+                dataformats="HWC",
+            )
+            writer.add_image(
+                f"centroid/img/{i+1}",
+                centroid_img[i],
+                global_step=epoch_step,
+                dataformats="HWC",
+            )
+            writer.add_image(
+                f"scale/img/{i+1}",
+                scale_image[i],
                 global_step=epoch_step,
                 dataformats="HWC",
             )
