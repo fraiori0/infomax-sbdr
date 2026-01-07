@@ -14,13 +14,13 @@ np.set_printoptions(precision=4, suppress=True)
 pio.renderers.default = "browser"
 
 SEED = 986
-N_FEATURES = 256
+N_FEATURES = 64
 N_SAMPLES = 300
 
 EPS = 1e-5
 P_DES = 0.05
-LR = 0.5
-STEPS = 4000
+LR = 2
+STEPS = 10000
 ALPHA = 0.0
 
 GAMMA = 0.9
@@ -95,18 +95,31 @@ def update_samples(z, lr):
         z_avg = z.mean(axis=0)
         z_avg = jax.lax.stop_gradient(z_avg)
         # compute eligibility trace
-        # z_elg = eligibility_trace(z, gamma=GAMMA)
-        d0 = z_avg# / (1 - GAMMA)
-        z_elg = discounted_trace(z, d0=d0, gamma=GAMMA)
+        z_trace = eligibility_trace(z, gamma=GAMMA)
+        z_trace_avg = z_trace.mean(axis=0)
+        # d0 = z_avg / (1 - GAMMA)
+        # z_trace = discounted_trace(z, d0=d0, gamma=GAMMA)*(1 - GAMMA)
 
-        # loss_val = infonce(z, z_avg, eps=EPS).sum()
         # loss_val = crossentropy(z, z_avg, eps=EPS).sum()
         # loss_val = crosslinear(z, z_avg, eps=EPS).sum()
-        loss_val = infonce(z_elg, z_avg, eps=EPS).sum()
+        # loss_val = crossentropy(z_trace, z_trace_avg, eps=EPS).sum()
+        cl = crosslinear(z_trace, z_avg, eps=EPS).sum()
+        mi = infonce(z_trace, z_avg, eps=EPS).sum()
+        loss_val = mi
+
+        """
+        Notes:
+            1. [SUCC] crosslinear with eligibility trace and z_avg (i.e., avg on single steps, not on eligibility trace)
+                seems to work well to produce binary activity.
+                However, does it actually maximize some sort of MI or separation?
+            2. [SUCC] also using infonce on eligibility trce brings sparse binary activity;
+                however, it happens very slowly and it needs a lot of epochs/steps.
+        """
 
         aux = {
             "z": z,
-            "z_avg": z_avg
+            "z_avg": z_avg,
+            "mi": mi,
         }
         return loss_val, aux
 
@@ -131,7 +144,7 @@ def update_samples(z, lr):
 print("\nDrawing samples")
 
 key, _ = jax.random.split(key)
-z0 = jax.random.uniform(key, shape=(N_SAMPLES, N_FEATURES))
+z0 = jax.random.uniform(key, shape=(N_SAMPLES, N_FEATURES), minval=-2.0, maxval=2.0)
 
 z_new, aux = update_samples(z0, lr=LR)
 
@@ -148,13 +161,13 @@ dz_avg = aux["dz"].mean(axis=0)
 
 print("\nPerforming updates")
 z = z0.copy()
-for step in tqdm(range(STEPS)):
+for step in tqdm(range(STEPS), disable=True):
     key, _ = jax.random.split(key)
     z, aux = update_samples(z, lr=LR)
 
-    # if step % 10 == 0:
-    #     print(f"\tStep: {step} \tLoss: {aux['loss']}")
-    #     print(f"\tact_avg = {aux['z'].mean()}")
+    if step % 10 == 0:
+        print(f"\tStep: {step} \tLoss: {aux['loss']} \tMI: {aux['mi'].mean()}")
+        print(f"\tact_avg = {aux['z'].mean()}")
 
 print(f"\tUpdated z shape: {z.shape}")
 print("\tAux shapes:")
