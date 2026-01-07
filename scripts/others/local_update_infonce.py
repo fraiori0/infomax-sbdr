@@ -17,10 +17,10 @@ SEED = 986
 N_FEATURES = 64
 N_SAMPLES = 300
 
-EPS = 1e-5
-P_DES = 0.05
+EPS = 1e-1
+P_DES = 0.02
 LR = 2
-STEPS = 10000
+STEPS = 2000
 ALPHA = 0.0
 
 GAMMA = 0.9
@@ -80,9 +80,9 @@ def crosslinear(z, z_avg, eps=1e-8):
     return -h
 
 def infonce(z, z_avg, eps=1e-8):
-    pii = (z*z).sum(-1)
-    pij = (z[..., None, :] * z[..., :, None]).sum(-1)
-    mi = sbdr.infonce(pii, pij, eps=eps)
+    pii = (z*z).sum(-1) + eps
+    pij = (z[..., None, :] * z[..., :, None]).sum(-1) + eps
+    mi = sbdr.infonce(pii, pij, eps=1e-6)
     loss_val = -mi
     return loss_val
 
@@ -105,12 +105,12 @@ def update_samples(z, lr):
         # loss_val = crossentropy(z_trace, z_trace_avg, eps=EPS).sum()
         cl = crosslinear(z_trace, z_avg, eps=EPS).sum()
         mi = infonce(z_trace, z_avg, eps=EPS).sum()
-        loss_val = mi
+        loss_val = cl
 
         """
         Notes:
             1. [SUCC] crosslinear with eligibility trace and z_avg (i.e., avg on single steps, not on eligibility trace)
-                seems to work well to produce binary activity.
+                seems to work well to produce binary activity and achieve the desired sparsity.
                 However, does it actually maximize some sort of MI or separation?
             2. [SUCC] also using infonce on eligibility trce brings sparse binary activity;
                 however, it happens very slowly and it needs a lot of epochs/steps.
@@ -187,12 +187,21 @@ print(f"\tAverage activity: {avg_z}")
 
 z0_plot = encode(z0)
 z_plot = encode(z)
+z_trace_plot = eligibility_trace(z_plot, gamma=GAMMA)
+
+# order units in order of activity
+unit_avg_activity = z_plot.mean(axis=0)
+unit_order = np.argsort(unit_avg_activity)
+z0_plot = z0_plot[:, unit_order]
+z_plot = z_plot[:, unit_order]
+z_trace_plot = z_trace_plot[:, unit_order]
 
 fig = make_subplots(
-    rows=1, cols=2,
+    rows=1, cols=3,
     subplot_titles=(
         "Initial Samples",
         "Trained Samples",
+        "Traces"
     ),
     horizontal_spacing=0.15,
     # vertical_spacing=0.15,
@@ -222,6 +231,17 @@ fig.add_trace(
         colorscale="plasma",
     ),
     row=1, col=2,
+)
+
+fig.add_trace(
+    go.Heatmap(
+        z=z_trace_plot,
+        showscale=False,
+        zmin=0.0,
+        zmax=1.0,
+        colorscale="plasma",
+    ),
+    row=1, col=3,
 )
 
 fig.show()
