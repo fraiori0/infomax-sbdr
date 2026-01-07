@@ -8,8 +8,8 @@ def bernoulli_uniform(
     dtype = np.float32,
 ):
     """Builds an initializer that returns an array
-    with each element selected from {0, scale}
-    according to a bernoulli with probabiliy 'p' of being equal to scale.
+    with each element selected from the set {0, scale}
+    using to a bernoulli with probabiliy 'p' of being equal to scale.
 
     Args:
         scale: optional; the upper bound of the random distribution.

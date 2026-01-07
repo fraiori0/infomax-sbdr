@@ -96,3 +96,27 @@ def weighted_flo(uii, pii, pij, wij, eps=1e-6):
     flo = 1 - (uii + np.exp(-uii) * e_p)
 
     return flo
+
+
+def infonce(pii, pij, eps=1e-6, mask_ij=None):
+    """Estimate the Mutual Information between x_i and y_i using the InfoNCE estimator
+
+    Args:
+        pii (np.ndarray): p(x_i | y_i). Note, no logarithm here, as we would anyway raise it using exponentials and cancel it out
+        pij (np.ndarray): p(x_i | y_j). Note, no logarithm here, as we would anyway raise it using exponentials and cancel it out
+        eps (float, optional): Small value to add in operations that could be numerically unstable. Defaults to 1e-6.
+
+    Returns:
+        (np.ndarray): Mutual Information between x_i and y_i
+
+    Note:
+        Here we consider that pij does contain pii
+    """
+    if mask_ij is None:
+        denom = pij.mean(axis=-1)
+    else:
+        denom = (mask_ij * pij).mean(axis=-1)
+
+    infonce = np.log((pii + eps) / (denom + eps))
+
+    return infonce

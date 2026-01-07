@@ -8,21 +8,50 @@ import plotly.io as pio
 from plotly.subplots import make_subplots
 import infomax_sbdr as sbdr
 from tqdm import tqdm
+from functools import partial
 
 np.set_printoptions(precision=4, suppress=True)
 pio.renderers.default = "browser"
 
 SEED = 986
-EPS = 1e-2
+N_FEATURES = 256
+N_SAMPLES = 300
+
+EPS = 1e-5
 P_DES = 0.05
-LR = 0.8
-STEPS = 10000
+LR = 0.5
+STEPS = 4000
 ALPHA = 0.0
 
-N_FEATURES = 128
-N_SAMPLES = 1500
+GAMMA = 0.9
+# GAMMA = jax.random.uniform(jax.random.key(SEED), shape=(N_FEATURES,), minval=0.3, maxval=0.9)
+
 
 key = jax.random.PRNGKey(SEED)
+
+@partial(jit, static_argnames=("gamma",))
+def eligibility_trace(z, gamma=0.9):
+    # compute the eligibility trace of z along axis 0
+    def f_scan(carry, input):
+        e = carry
+        z_t = input
+        e = gamma * e * (1 - z_t) + z_t
+        return e, e
+    e0 = np.zeros(z.shape[-1])
+    _, e_trace = jax.lax.scan(f_scan, e0, z)
+    return e_trace
+
+# @jit
+@partial(jit, static_argnames=("gamma"))
+def discounted_trace(z, d0, gamma=0.9):
+    # compute the eligibility trace of z along axis 0
+    def f_scan(carry, input):
+        e = carry
+        z_t = input
+        e = gamma * e + z_t
+        return e, e
+    _, d_trace = jax.lax.scan(f_scan, d0, z)
+    return d_trace
 
 def encode(z):
     return jax.nn.sigmoid(z)
@@ -50,6 +79,13 @@ def crosslinear(z, z_avg, eps=1e-8):
     
     return -h
 
+def infonce(z, z_avg, eps=1e-8):
+    pii = (z*z).sum(-1)
+    pij = (z[..., None, :] * z[..., :, None]).sum(-1)
+    mi = sbdr.infonce(pii, pij, eps=eps)
+    loss_val = -mi
+    return loss_val
+
 @jit
 def update_samples(z, lr):
     # z of shape (*batch_dims, features)
@@ -58,10 +94,15 @@ def update_samples(z, lr):
         z = encode(z)
         z_avg = z.mean(axis=0)
         z_avg = jax.lax.stop_gradient(z_avg)
-        
+        # compute eligibility trace
+        # z_elg = eligibility_trace(z, gamma=GAMMA)
+        d0 = z_avg# / (1 - GAMMA)
+        z_elg = discounted_trace(z, d0=d0, gamma=GAMMA)
+
         # loss_val = infonce(z, z_avg, eps=EPS).sum()
         # loss_val = crossentropy(z, z_avg, eps=EPS).sum()
-        loss_val = crosslinear(z, z_avg, eps=EPS).sum()
+        # loss_val = crosslinear(z, z_avg, eps=EPS).sum()
+        loss_val = infonce(z_elg, z_avg, eps=EPS).sum()
 
         aux = {
             "z": z,
@@ -90,7 +131,7 @@ def update_samples(z, lr):
 print("\nDrawing samples")
 
 key, _ = jax.random.split(key)
-z0 = 3.0 + jax.random.uniform(key, shape=(N_SAMPLES, N_FEATURES))
+z0 = jax.random.uniform(key, shape=(N_SAMPLES, N_FEATURES))
 
 z_new, aux = update_samples(z0, lr=LR)
 
