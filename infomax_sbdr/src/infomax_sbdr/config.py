@@ -12,6 +12,7 @@ import infomax_sbdr.antihebbian_xor_modules as xor_ah
 import infomax_sbdr.antihebbian_td_modules as td_ah
 import infomax_sbdr.antihebbian_band_modules as band_ah
 import infomax_sbdr.neural_gas as neural_gas
+import infomax_sbdr.spike_eligibility_modules as se_modules  
 
 
 """
@@ -71,7 +72,9 @@ config_ah_module_dict = {
     "AntiHebbianXORModule": xor_ah.AntiHebbianXORModule,
     "AntiHebbianTDModule": td_ah.AntiHebbianTDModule,
     "AntiHebbianBandModule": band_ah.AntiHebbianBandModule,
+    "SpikeEligibilityModule": se_modules.SpikeEligibilityModule,
 }
+
 
 
 config_centroid_modules_dict = {
