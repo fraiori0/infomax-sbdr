@@ -172,14 +172,16 @@ print("\nInitializing model")
 
 model_class = sbdr.config_ah_module_dict[model_config["model"]["type"]]
 
+th = -0.5
 model = model_class(
     **model_config["model"]["kwargs"],
+    threshold = [th for _ in model_config["model"]["kwargs"]["n_units"]],
     train = True,
 )
 
 model_eval = model_class(
     **model_config["model"]["kwargs"],
-    threshold = [0.0 for _ in model_config["model"]["kwargs"]["n_units"]],
+    # threshold = [th for _ in model_config["model"]["kwargs"]["n_units"]],
     train = False,
 )
 
@@ -230,12 +232,10 @@ print("\nForward scan jitted")
 
 def forward_scan(variables, xs_seq, key):
     e0_l = model.gen_initial_state(key, xs_seq[..., 0, :])
-    print(f"e0_l shapes: {[e0.shape for e0 in e0_l]}")
     return model.apply(
         variables,
         xs_seq,
         *e0_l,
-        mutable = ["ema"],
         method="scan",
     )
 
@@ -256,48 +256,93 @@ xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
 
 outs = forward_jitted(variables, xs, key)
-_ = forward_eval_jitted(variables, xs, key)
+outs_eval = forward_eval_jitted(variables, xs, key)
 
 print(f"\tInput shape: {xs.shape}")
 print(f"\tOutput shapes:")
 pprint(get_shapes(outs))
 
-exit()
-
-# print(f"\nTest one epoch:")
-# # test time for one epoch
-# t0 = time()
-# for (xs_1, xs_2), labels in tqdm(dataloader_train):
-#     key, _ = jax.random.split(key)
-#     forward_jitted(variables, xs_1, key)
-
-# print(f"\tTime for one epoch: {time() - t0}")
-
 
 """---------------------"""
-""" Parameter Update """
+""" Loss Function """
 """---------------------"""
 
-print("\nParameter update jitted")
+sim_fn = partial(
+    sbdr.config_similarity_dict[model_config["training"]["loss"]["sim_fn"]["type"]],
+    **model_config["training"]["loss"]["sim_fn"]["kwargs"],
+)
 
-def update_params(variables, **kwargs):
-    return model.update_params(variables, **kwargs)
-update_params_jitted = jit(update_params)
+def mi_loss(
+        z,
+        key,
+        u_ii=None,
+    ):
+    # z of shape [batch, time, features]
+    eps = 1.0e-6
 
-# test
+    # flatten all dims except features, shuffle, and unflatten
+    batch_shape = z.shape[:-1]
+    z = z.reshape((-1, z.shape[-1]))
+    z = jax.random.permutation(key, z, axis=0)
+    # reshape to [time, batch, features], i.e., inverting batch_shape
+    z = z.reshape((*batch_shape, -1))
+    z = np.moveaxis(z, 1, 0)
 
+    # # # Contrastive Mutual Information FLO estimator
+    # # Positive samples
+    p_ii = sim_fn(z, z)
+    # # Negative samples (on ex reshaped and shuffled batch dim)
+    p_ij = sim_fn(z[..., :, None, :], z[..., None, :, :])
+    # InfoNCE
+    mi = sbdr.infonce(p_ii, p_ij, eps=eps)
+    mi = mi.mean()
+
+    # # Average activation
+    # z_avg = z.mean(axis=0)
+    # z_avg = jax.lax.stop_gradient(z_avg)
+    # # alpha = ALPHA
+    # alpha = np.where(z_avg < 0.05, 0.0, 1.0 - 0.0)
+    # h = (1-alpha) * z*(z+0.5) + alpha * (z-1)*(z-1.5)
+    # h = h.mean()
+    
+    loss_val = - mi
+    return loss_val
+
+def module_losses(outs, key):
+    # compute the loss for each layer in the module
+    loss_vals = []
+    for idx_layer, z in enumerate(outs["e_l"]):
+        # use this to skip a layer when debugging
+        # if idx_layer==1:
+        #     continue
+        l_val = mi_loss(
+            z,
+            key,
+        )
+        loss_vals.append(l_val)
+        key, _ = jax.random.split(key)
+
+    return np.array(loss_vals).sum()
+
+
+mi_loss_jitted = jit(mi_loss)
+
+# test loss function
 xs, labels = next(iter(dataloader_train))
+# xs_1 = jax.device_put(xs_1)
+# xs_2 = jax.device_put(xs_2)
+
 key = jax.random.key(model_config["model"]["seed"])
 
 outs = forward_jitted(variables, xs, key)
 
-tmp_params, tmp_d_params = update_params_jitted(variables, outs=outs, lr = 0.01, momentum = 0.9)
+print(f"\tInput shape: {xs.shape}")
+print(f"\tOutput shapes:")
+pprint(get_shapes(outs))
 
-print(f"\tShape of parameter updates:")
-pprint(get_shapes(tmp_d_params))
+loss = module_losses(outs, key)
 
-# pprint(jax.tree.map(lambda x: np.any(np.isnan(x)), tmp_d_params))
-# pprint(jax.tree.map(lambda x: np.any(np.isclose(x, 0)), tmp_d_params))
+print(f"\tLoss: {loss}")
 
 
 """---------------------"""
@@ -317,16 +362,15 @@ checkpoint_manager = orbax.checkpoint.CheckpointManager(
 
 print("\nCheckpointing stuff")
 
+# add batch stats to train state
+optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
+optimizer = optimizer(**model_config["training"]["optimizer"]["kwargs"])
+
 state = {
     "variables": variables,
+    "opt_state": optimizer.init(variables["params"]),
     "step": 0,
 }
-
-# # save state
-# checkpoint_manager.save(
-#     0,
-#     args=orbax.checkpoint.args.StandardSave(state),
-# )
 
 LAST_STEP = checkpoint_manager.latest_step()
 if LAST_STEP is None:
@@ -336,88 +380,140 @@ else:
         step=LAST_STEP, args=orbax.checkpoint.args.StandardRestore(state)
     )
 
-variables = state["variables"]
+variables = state["variables"].copy()
 
 print(f"\tLast step: {LAST_STEP}")
 
+
 """---------------------"""
-""" Training and Evaluation Steps """
+""" Training Utils """
 """---------------------"""
 
 print("\nTraining and Evaluation Steps")
 
-Q_KEYS = ["0.05", "0.1", "0.25", "0.5", "0.75", "0.9", "0.95"]
-QS = np.array((0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95))
+Q_KEYS = ["0.05", "0.25", "0.5", "0.75", "0.95"]
+QS = np.array((0.05, 0.25, 0.5, 0.75, 0.95))
 
 @jit
 def compute_metrics(outs):
     """Compute metrics from model outputs."""
 
-    # compute quantiles of unit activation in the batch
-    z_avg = np.mean(outs["z"].reshape((-1, outs["z"].shape[-1])), axis=0)
-    qs_z_val = np.quantile(z_avg, QS)
+    for idx_layer, z in enumerate(outs["out"]):
 
-    # compute quantiles of sample activation in the batch
-    s_avg = np.mean(outs["z"].reshape((-1, outs["z"].shape[-1])), axis=-1)
-    qs_s_val = np.quantile(s_avg, QS)
+        # compute quantiles of unit activation in the batch
+        z_avg = np.mean(z.reshape((-1, z.shape[-1])), axis=0)
+        qs_z_val = np.quantile(z_avg, QS)
 
-    # compute average td error
-    td_err = np.abs(outs["td_ex_prev"]).mean()
+        # compute quantiles of sample activation in the batch
+        s_avg = np.mean(z.reshape((-1, z.shape[-1])), axis=-1)
+        qs_s_val = np.quantile(s_avg, QS)
 
-    metrics = {
-        f"unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)
-    }
-    metrics.update(
-        {f"sample/{k}": v for k, v in zip(Q_KEYS, qs_s_val)}
-    )
-
-    metrics["td_err"] = td_err
+        metrics = {
+            f"unit/{idx_layer}/{k}": v for k, v in zip(Q_KEYS, qs_z_val)
+        }
+        metrics.update(
+            {f"sample/{idx_layer}/{k}": v for k, v in zip(Q_KEYS, qs_s_val)}
+        )
 
     return metrics
 
+"""---------------------"""
+""" Training And Eval Steps """
+"""---------------------"""
 
-# @jit
+print("\nTraining and Evaluation Steps")
+
+
+@jit
 def train_step(state, batch):
-    outs = forward_jitted(
-        state["variables"],
-        batch["x"],
-        batch["key"],
-    )
-
-    # remove the first steps
-    outs = jax.tree.map(lambda x: x[..., model_config["model"]["seq"]["skip_first"]:, :], outs)
-
-    params, d_params = update_params_jitted(
-        state["variables"],
-        outs=outs,
-        lr=model_config["training"]["learning_rate"],
-        momentum=model_config["model"]["kwargs"]["momentum"],
-    )
-
-    # assign new params to variables
-    state["variables"]["params"] = params["params"]
-
-    # update step
-    state["step"] += 1
-
-    # Metrics
-    metrics = compute_metrics(outs)
-
-    return state, metrics
-
-
-# @jit
-def eval_step(state, batch):
-
-    outs = forward_eval_jitted(
-            state["variables"],
+    def loss_fn(params):
+        # Apply the model
+        outs = forward_scan(
+            {
+                "params": params,
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
+            },
             batch["x"],
             batch["key"],
         )
 
-    # Metrics
-    metrics = compute_metrics(outs)
-    
+        # Compute FLO loss
+        mi_loss_val = module_losses(outs, batch["key"])
+        loss_val = mi_loss_val
+
+        metrics = compute_metrics(outs)
+
+        metrics["loss/total"] = loss_val
+        metrics["loss/mi"] = mi_loss_val
+
+
+        others = {
+            # BATCH_NORM - change here
+            # "mutable_updates": jax.tree.map(
+            #     lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
+            # ),
+        }
+
+        return loss_val, (metrics, others)
+
+    # compute gradient, loss, and aux
+    grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
+    (loss_val, (metrics, others)), grads = grad_fn(state["variables"]["params"])
+    # update weights
+    updates, opt_state = optimizer.update(grads, state["opt_state"], state["variables"]["params"])
+    state["variables"]["params"] = optax.apply_updates(
+        state["variables"]["params"], updates
+    )
+    # Update optimizer state
+    state["opt_state"] = opt_state
+
+    # # BATCH_NORM - change here
+    # # update batch stats
+    # state["variables"]["batch_stats"] = others["mutable_updates"]["batch_stats"]
+
+    # update step
+    state["step"] += 1
+
+    return state, metrics, grads
+
+
+@jit
+def eval_step(state, batch):
+    def loss_fn(params):
+        # Apply the model
+        # BATCH_NORM - change here
+        # outs_1, mutable_updates_1 = forward_eval(
+        outs = forward_scan_eval(
+            {
+                "params": params,
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
+            },
+            batch["x"],
+            batch["key"],
+        )
+
+        # Compute FLO loss
+        mi_loss_val = module_losses(outs, batch["key"])
+        loss_val = mi_loss_val
+
+        # # Compute metrics
+        metrics = compute_metrics(outs)
+        metrics["loss/total"] = loss_val
+        metrics["loss/mi"] = mi_loss_val
+
+        others = {
+            # "mutable_updates": jax.tree.map(
+            #     lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
+            # ),
+        }
+
+        return loss_val, (metrics, others)
+
+    # compute loss
+    loss_val, (metrics, others) = loss_fn(state["variables"]["params"])
+
     return metrics
 
 
@@ -427,16 +523,30 @@ xs, labels = next(iter(dataloader_train))
 # xs_1 = jax.device_put(xs_1)
 # xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
+key_1, key_2 = jax.random.split(key)
 batch = {
     "x": xs,
     "key": key,
 }
 
-state, metrics = train_step(state, batch)
+state, metrics, grads = train_step(state, batch)
 metrics_val = eval_step(state, batch)
 
-print(f"\tMetrics:")
-pprint(metrics)
+print(f"\tLoss: {metrics['loss/total']}")
+
+gradients_are_finite = jax.tree_util.tree_map(
+    lambda x: np.all(np.isfinite(x)).item(), grads
+)
+gradients_are_zero = jax.tree_util.tree_map(
+    lambda x: np.all(np.isclose(x, 0.0, rtol=1e-20, atol=1e-20)).item(), grads
+)
+gradients_are_nan = jax.tree_util.tree_map(lambda x: np.any(np.isnan(x)).item(), grads)
+print(f"\tGradients are FINITE:")
+pprint(gradients_are_finite)
+print(f"\tGradients are ZERO (tolerance):")
+pprint(gradients_are_zero)
+print(f"\tGradients are NAN:")
+pprint(gradients_are_nan)
 
 
 """------------------"""
@@ -452,6 +562,14 @@ def activation_seq_to_img(z_seq):
     # Convert to NumPy
     z = onp.array(z)
     return z
+
+def img_from_output(outs):
+    # for each layer in outs["z"], convert to image
+    img_dict = {}
+    for idx_layer, z in enumerate(outs["out"]):
+        z_img = activation_seq_to_img(z)
+        img_dict[f"img_layer_{idx_layer}"] = z_img
+    return img_dict
 
 
 """------------------"""
@@ -488,13 +606,13 @@ try:
                 "x": xs,
                 "key": key,
             }
-            state, metrics = train_step(state, batch)
+            state, metrics, grads = train_step(state, batch)
             LAST_STEP = state["step"]#.item()
 
             # Log stats for the train batch
             for metric, value in metrics.items():
                 writer.add_scalar(
-                    metric + "/train/batch", value.item(), global_step=LAST_STEP
+                    "train/" + metric, value.item(), global_step=LAST_STEP
                 )
                 epoch_metrics[metric] += value
 
@@ -509,7 +627,7 @@ try:
                 metrics_val = eval_step(state, batch_val)
                 for metric, value in metrics_val.items():
                     writer.add_scalar(
-                        metric + "/val/batch", value.item(), global_step=LAST_STEP
+                        "val/" + metric, value.item(), global_step=LAST_STEP
                     )
                     epoch_metrics_val[metric] += value
 
@@ -525,11 +643,11 @@ try:
         # Log epoch stats
         for metric, value in epoch_metrics.items():
             writer.add_scalar(
-                metric + "/train/epoch", value.item(), global_step=epoch_step
+                metric + "/train", value.item(), global_step=epoch_step
             )
         for metric, value in epoch_metrics_val.items():
             writer.add_scalar(
-                metric + "/val/epoch", value.item(), global_step=epoch_step
+                metric + "/val", value.item(), global_step=epoch_step
             )
 
         # Save checkpoint
@@ -545,14 +663,16 @@ try:
         key_img = jax.random.key(epoch_step)
         outs_img = forward_eval_jitted(state["variables"], xs_img, key_img)
         # convert to images
-        activation_imgs = activation_seq_to_img(outs_img["z"])
-        for i in range(activation_imgs.shape[0]):
-            writer.add_image(
-                f"activation/img/{i+1}",
-                activation_imgs[i],
-                global_step=epoch_step,
-                dataformats="HWC",
-            )
+        img_dict = img_from_output(outs_img)
+        for k, v in img_dict.items():
+            activation_imgs = v
+            for i in range(8):
+                writer.add_image(
+                    f"{k}/{i+1}",
+                    activation_imgs[i],
+                    global_step=epoch_step,
+                    dataformats="HWC",
+                )
 
 
 except KeyboardInterrupt:

@@ -3,11 +3,25 @@ import json
 import pickle
 import jax.numpy as np
 import orbax.checkpoint
+import jax
 
 
 # convolution operator over one specified axis, useful for time convolution with arbitrary batch dimensions
 def conv1d(x, w, axis: int, mode="valid"):
     return np.apply_along_axis(lambda x: np.convolve(x, w, mode=mode), axis, x)
+
+def sigmoid_ste(x):
+    """ Sigmoid activation with straight-through gradient """
+    zero = x - jax.lax.stop_gradient(x)
+    return zero + jax.nn.sigmoid(jax.lax.stop_gradient(x))
+
+def threshold_softgradient(x, threshold):
+    """ Threshold function with the gradient of a sigmoid"""
+    zero = jax.nn.sigmoid(x) - jax.lax.stop_gradient(jax.nn.sigmoid(x))
+    return zero + (x >= threshold).astype(x.dtype)
+
+def get_shapes(pytree):
+    return jax.tree.map(lambda x: x.shape, pytree)
 
 
 def print_pytree_shapes(pytree, prefix=""):

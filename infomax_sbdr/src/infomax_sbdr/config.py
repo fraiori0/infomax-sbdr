@@ -13,6 +13,7 @@ import infomax_sbdr.antihebbian_td_modules as td_ah
 import infomax_sbdr.antihebbian_band_modules as band_ah
 import infomax_sbdr.neural_gas as neural_gas
 import infomax_sbdr.spike_eligibility_modules as se_modules  
+import infomax_sbdr.utils as ut
 
 
 """
@@ -30,6 +31,8 @@ config_activation_dict = {
     "leaky_relu": nn.leaky_relu,
     "identity": lambda x: x,
     "mish": jax.nn.mish,
+    "sigmoid_ste": ut.sigmoid_ste,
+
 }
 
 config_torch_activation_dict = {

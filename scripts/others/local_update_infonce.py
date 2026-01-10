@@ -19,7 +19,7 @@ N_SAMPLES = 300
 
 EPS = 1e-1
 P_DES = 0.02
-LR = 2
+LR = 0.1
 STEPS = 2000
 ALPHA = 0.0
 
@@ -54,13 +54,14 @@ def discounted_trace(z, d0, gamma=0.9):
     return d_trace
 
 def encode(z):
+    # return sbdr.sigmoid_ste(z)
     return jax.nn.sigmoid(z)
 
 def expsim(z1, z2, eps=1e-8):
     return (z1*z2).sum(-1)
 
-def infonce(z, z_avg, eps=1e-8):
-    return np.log(expsim(z, z_avg) + eps) - np.log(expsim(z, z) + eps)
+# def infonce(z, z_avg, eps=1e-8):
+#     return np.log(expsim(z, z_avg) + eps) - np.log(expsim(z, z) + eps)
 
 def crossentropy(z, z_avg, eps=1e-8):
     # alpha = ALPHA

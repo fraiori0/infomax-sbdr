@@ -2,13 +2,9 @@ import jax
 import jax.numpy as np
 import flax.linen as nn
 from typing import Dict, Any, Sequence
+from infomax_sbdr.utils import threshold_softgradient
 
 """ Utility functions and modules"""
-
-def threshold_softgradient(x, threshold):
-    """ Threshold function with the gradient of a sigmoid"""
-    zero = jax.nn.sigmoid(x) - jax.lax.stop_gradient(jax.nn.sigmoid(x))
-    return zero + (x >= threshold).astype(x.dtype)
 
 def eligibility_step(e_prev, x, gamma):
     """ Update eligibility trace with decay and new input. """
@@ -101,6 +97,8 @@ class SpikeEligibilityDense(nn.Module):
         y_f = self.forward(e_x)
         # Lateral pass
         y_l = self.lateral(e_l_prev)
+        # remove self-connections
+        y_l = y_l - np.diag(self.lateral.get_variable("params", "kernel")) * e_l_prev
         # Combine and apply activation function
         y = y_f + y_l
         if self.threshold is not None:

@@ -34,7 +34,7 @@ def bernoulli_kl_divergence_stable(p, q):
     ).sum(axis=-1)
 
 
-def bernoulli_entropy_stable(p):
+def bernoulli_entropy_stable(p, eps=1e-8):
     """Compute the entropy of a multivariate Bernoulli distribution
     Args:
         p (ndarray): probabilities of being =1 of each element of the multivariate bernoulli distribution
@@ -42,7 +42,7 @@ def bernoulli_entropy_stable(p):
     Returns:
         (ndarray): entropy
     """
-    return -(p * np.log(p + 1e-6) + (1 - p) * np.log(1 - p + 1e-6)).sum(axis=-1)
+    return -(p * np.log(p + eps) + (1 - p) * np.log(1 - p + eps)).sum(axis=-1)
 
 
 def negative_bernoulli_crossentropy_stable(p, q, eps=1e-6):

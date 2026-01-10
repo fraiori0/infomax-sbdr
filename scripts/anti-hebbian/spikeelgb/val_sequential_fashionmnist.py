@@ -40,10 +40,10 @@ BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "td" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "3"
+default_model = "spikeelgb" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 5  # 102
+default_step = 25  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -196,8 +196,12 @@ print("\nInitializing model")
 
 model_class = sbdr.config_ah_module_dict[model_config["model"]["type"]]
 
+th = -0.5
+
 model_eval = model_class(
     **model_config["model"]["kwargs"],
+    threshold = [th for _ in model_config["model"]["kwargs"]["n_units"]],
+    train = False,
 )
 
 # # # Initialize parameters
@@ -205,13 +209,17 @@ model_eval = model_class(
 xs, labels = next(iter(dataloader_train))
 # Generate a random initial state
 key = jax.random.key(model_config["model"]["seed"])
-s0 = model_eval.generate_initial_state(key, xs[..., 0, :])
+e0_l = model_eval.gen_initial_state(key, xs[..., 0, :])
+
+print(xs.shape)
+print(len(e0_l))
+print([e0.shape for e0 in e0_l])
 
 # Init params and batch_stats
 variables = model_eval.init(
     key,
     xs[..., 0, :],
-    **s0,
+    *e0_l,
 )
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
@@ -228,40 +236,38 @@ pprint(get_shapes(variables))
 """ Forward Pass """
 """---------------------"""
 
+# perform a single forward pass as a test
+outs = model_eval.apply(
+    variables,
+    xs[..., 0, :],
+    *e0_l,
+)
+
+print(f"\tOutput shapes for single step forward pass:")
+pprint(get_shapes(outs))
+
 print("\nForward scan jitted")
 
-
-def forward_scan(variables, xs_seq, key):
-    s0 = model_eval.generate_initial_state(key, xs_seq[..., 0, :])
+def forward_scan_eval(variables, xs_seq, key):
+    e0_l = model_eval.gen_initial_state(key, xs_seq[..., 0, :])
     return model_eval.apply(
         variables,
         xs_seq,
-        **s0,
-        method=model_eval.forward_scan,
+        *e0_l,
+        method="scan",
     )
 
-
-forward_jitted = jit(forward_scan)
+forward_eval_jitted = jit(forward_scan_eval)
 
 # test the forward scan
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
 
-outs = forward_jitted(variables, xs, key)
+outs_eval = forward_eval_jitted(variables, xs, key)
 
 print(f"\tInput shape: {xs.shape}")
 print(f"\tOutput shapes:")
 pprint(get_shapes(outs))
-
-# print(f"\nTest one epoch:")
-# # test time for one epoch
-# t0 = time()
-# for (xs_1, xs_2), labels in tqdm(dataloader_train):
-#     key, _ = jax.random.split(key)
-#     forward_jitted(variables, xs_1, key)
-
-# print(f"\tTime for one epoch: {time() - t0}")
-
 
 """---------------------"""
 """ Import checkpoint """
@@ -279,8 +285,13 @@ checkpoint_manager = orbax.checkpoint.CheckpointManager(
     ),
 )
 
+# add batch stats to train state
+optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
+optimizer = optimizer(**model_config["training"]["optimizer"]["kwargs"])
+
 state = {
     "variables": variables,
+    "opt_state": optimizer.init(variables["params"]),
     "step": 0,
 }
 
@@ -302,6 +313,10 @@ pprint(get_shapes(variables))
 
 
 """---------------------"""
+""" Utils """
+"""---------------------"""
+
+"""---------------------"""
 """ Forward pass on training set """
 """---------------------"""
 
@@ -310,6 +325,7 @@ print("\nForward pass on the whole training set")
 key = jax.random.key(model_config["model"]["seed"])
 
 zs = []
+es_l = []
 labels_categorical = []
 
 for i, (xs, labels) in tqdm(enumerate(dataloader_train), total=len(dataloader_train)):
@@ -318,13 +334,19 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_train), total=len(dataloader_tr
     # if i > 20:
     #     break
 
-    # generate initial state
+    # Generate a random key
     key, _ = jax.random.split(key)
     # Compute outputs
-    outs = forward_jitted(variables, xs, key)
+    outs = forward_eval_jitted(variables, xs, key)
 
-    # Record temporal average of output
-    zs.append(onp.array(outs["z"].mean(axis=-2)))
+    # Record output
+    zs_1 = outs["out"][0].mean(axis=-2)
+    zs_2 = outs["out"][1].mean(axis=-2)
+    es_l_1 = outs["e_l"][0].mean(axis=-2)
+    es_l_2 = outs["e_l"][1].mean(axis=-2)
+
+    zs.append(np.concatenate([zs_1, zs_2], axis=-1))
+    es_l.append(np.concatenate([es_l_1, es_l_2], axis=-1))
 
     # And categorical labels
     lab_cat = labels.argmax(axis=-1)
@@ -333,10 +355,12 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_train), total=len(dataloader_tr
 # Convert to have numpy arrays
 
 zs = onp.concatenate(zs, axis=0)
+es_l = onp.concatenate(es_l, axis=0)
 labels_categorical = onp.concatenate(labels_categorical, axis=0)
 
 history = {
     "zs": zs,
+    "es_l": es_l,
     "labels_categorical": labels_categorical,
 }
 
@@ -356,6 +380,7 @@ print("\nForward pass on the whole validation set")
 key = jax.random.key(model_config["model"]["seed"])
 
 zs_val = []
+es_l_val = []
 labels_categorical_val = []
 
 for i, (xs, labels) in tqdm(enumerate(dataloader_val), total=len(dataloader_val)):
@@ -364,13 +389,19 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_val), total=len(dataloader_val)
     # if i > 20:
     #     break
 
-    # generate initial state
+    # Generate a random key
     key, _ = jax.random.split(key)
     # Compute outputs
-    outs = forward_jitted(variables, xs, key)
+    outs = forward_eval_jitted(variables, xs, key)
 
-    # Record temporal average of output
-    zs_val.append(onp.array(outs["z"].mean(axis=-2)))
+    # Record output
+    zs_1 = outs["out"][0].mean(axis=-2)
+    zs_2 = outs["out"][1].mean(axis=-2)
+    es_l_1 = outs["e_l"][0].mean(axis=-2)
+    es_l_2 = outs["e_l"][1].mean(axis=-2)
+
+    zs_val.append(np.concatenate([zs_1, zs_2], axis=-1))
+    es_l_val.append(np.concatenate([es_l_1, es_l_2], axis=-1))
 
     # And categorical labels
     lab_cat = labels.argmax(axis=-1)
@@ -379,10 +410,12 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_val), total=len(dataloader_val)
 # Convert to have numpy arrays
 
 zs_val = onp.concatenate(zs_val, axis=0)
+es_l_val = onp.concatenate(es_l_val, axis=0)
 labels_categorical_val = onp.concatenate(labels_categorical_val, axis=0)
 
 history_val = {
     "zs_val": zs_val,
+    "es_l_val": es_l_val,
     "labels_categorical_val": labels_categorical_val,
 }
 

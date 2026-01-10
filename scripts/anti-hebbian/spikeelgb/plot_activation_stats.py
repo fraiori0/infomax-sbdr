@@ -17,13 +17,11 @@ np.set_printoptions(precision=4, suppress=True)
 pio.renderers.default = "browser"
 
 
-N_OUT_UNITS = 128
+N_OUT_UNITS = 128 + 96
 
 models = {
-    "td": {
-        # "1": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
-        # "2": {"name": r"$p_* = 0.07$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
-        "3": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
+    "spikeelgb": {
+        "1": {"name": r"$\epsilon = 0.1$", "chkp": 25, "color": "#d62728", "dash": "dash", "symbol": "x"},
     },
 }
 
@@ -290,11 +288,11 @@ for n_top_k in tqdm(N_K):
                 random_state=0,
                 tol=1e-4,
                 multi_class="ovr",
-                intercept_scaling=1,
+                intercept_scaling=10,
                 C=8,
                 penalty="l1",
                 loss="squared_hinge",
-                max_iter=1000,
+                max_iter=2000,
             )
 
             svm_model.fit(

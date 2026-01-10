@@ -113,9 +113,9 @@ def infonce(pii, pij, eps=1e-6, mask_ij=None):
         Here we consider that pij does contain pii
     """
     if mask_ij is None:
-        denom = pij.mean(axis=-1)
+        denom = (pij.sum(axis=-1)- pii)/(pii.shape[-1]-1)
     else:
-        denom = (mask_ij * pij).mean(axis=-1)
+        denom = ((mask_ij * pij).sum(axis=-1) - pii)/(mask_ij.sum(axis=-1))
 
     infonce = np.log((pii + eps) / (denom + eps))
 
