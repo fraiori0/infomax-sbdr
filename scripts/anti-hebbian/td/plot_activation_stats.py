@@ -17,13 +17,13 @@ np.set_printoptions(precision=4, suppress=True)
 pio.renderers.default = "browser"
 
 
-N_OUT_UNITS = 128
+N_OUT_UNITS = 256
 
 models = {
     "td": {
         # "1": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
         # "2": {"name": r"$p_* = 0.07$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
-        "3": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
+        "4": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
     },
 }
 

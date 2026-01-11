@@ -13,3 +13,4 @@ from infomax_sbdr.predefined_modules import *
 from infomax_sbdr.dataset_classifier import *
 from infomax_sbdr.dataset_xor import *
 import infomax_sbdr.analytic_score_diffusion as analytic_score_diffusion
+import infomax_sbdr.ahtd as ahtd
