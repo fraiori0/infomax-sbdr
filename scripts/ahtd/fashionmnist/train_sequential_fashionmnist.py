@@ -328,7 +328,8 @@ for xs, labels in dataloader_train:
     new_params = update_params(outs, **model)
     model = sbdr.ahtd.AHTDModule(new_params, model["hyperparams"], model["config"])
     z = outs[0]["z"]
-    print(z.mean(), z.std())
+    td_err = outs[0]["td_error"]
+    print(z.mean(), z.std(), td_err.mean())
 
 exit()
 """---------------------"""
@@ -343,26 +344,28 @@ QS = np.array((0.05, 0.25, 0.5, 0.75, 0.95))
 @jit
 def compute_metrics(outs):
     """Compute metrics from model outputs."""
+    metrics = {}
 
-    # compute quantiles of unit activation in the batch
-    z_avg = np.mean(outs["z"].reshape((-1, outs["z"].shape[-1])), axis=0)
-    qs_z_val = np.quantile(z_avg, QS)
+    for i, out_layer in enumerate(outs):
+        # compute quantiles of unit activation in the batch
+        z_avg = np.mean(out_layer["z"].reshape((-1, out_layer["z"].shape[-1])), axis=0)
+        qs_z_val = np.quantile(z_avg, QS)
 
-    # compute quantiles of sample activation in the batch
-    s_avg = np.mean(outs["z"].reshape((-1, outs["z"].shape[-1])), axis=-1)
-    qs_s_val = np.quantile(s_avg, QS)
+        # compute quantiles of sample activation in the batch
+        s_avg = np.mean(out_layer["z"].reshape((-1, out_layer["z"].shape[-1])), axis=-1)
+        qs_s_val = np.quantile(s_avg, QS)
 
-    # compute average td error
-    td_err = np.abs(outs["td_ex_prev"]).mean()
+        # compute average td error
+        td_err = np.abs(out_layer["td_error"]).mean()
 
-    metrics = {
-        f"unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)
-    }
-    metrics.update(
-        {f"sample/{k}": v for k, v in zip(Q_KEYS, qs_s_val)}
-    )
+        metrics.update(
+            {f"{i}_unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)}
+        )
+        metrics.update(
+            {f"{i}_sample/{k}": v for k, v in zip(Q_KEYS, qs_s_val)}
+        )
 
-    metrics["td_err"] = td_err
+        metrics[f"td_error/{i}"] = td_err
 
     return metrics
 
@@ -370,68 +373,66 @@ def compute_metrics(outs):
 """ Training and Evaluation Steps """
 """---------------------"""
 
-# @jit
-def train_step(state, batch):
-    outs = forward_jitted(
-        state["variables"],
-        batch["x"],
-        batch["key"],
-    )
-
-    # remove the first steps
-    outs = jax.tree.map(lambda x: x[..., model_config["model"]["seq"]["skip_first"]:, :], outs)
-
-    params, d_params = update_params_jitted(
-        state["variables"],
-        outs=outs,
-        lr=model_config["training"]["learning_rate"],
-        momentum=model_config["model"]["kwargs"]["momentum"],
-    )
-
-    # assign new params to variables
-    state["variables"]["params"] = params["params"]
-
-    # update step
-    state["step"] += 1
+@partial(jit, static_argnums=(2, 3))
+def train_step_jit_part(batch, params, hyperparams, config):
+    # Forward pass
+    outs = forward(batch["x"], params, hyperparams, config)
+    # remove the first steps on the time dimension, to have some warm-up
+    outs = jax.tree.map(lambda x: x[..., config_dict["model"]["seq"]["skip_first"]:, :], outs)
+    # Update params
+    new_params = update_params(outs, params, hyperparams, config)
 
     # Metrics
     metrics = compute_metrics(outs)
 
+    return new_params, metrics
+
+# this function avoid issues with JIT in not using strings as output
+def train_step(batch, state):
+    params, metrics = train_step_jit_part(batch, **state["model"])
+    # create new state
+    state = {
+        "model": sbdr.ahtd.AHTDModule(
+            params,
+            state["model"]["hyperparams"],
+            state["model"]["config"],
+        ),
+        "step": state["step"] + 1
+    }
     return state, metrics
 
 
-# @jit
-def eval_step(state, batch):
-
-    outs = forward_eval_jitted(
-            state["variables"],
-            batch["x"],
-            batch["key"],
-        )
-
+@partial(jit, static_argnums=(2, 3))
+def eval_step_jit_part(batch, params, hyperparams, config):
+    # Forward pass
+    outs = forward(batch["x"], params, hyperparams, config)
+    # remove the first steps on the time dimension, to have some warm-up
+    outs = jax.tree.map(lambda x: x[..., config_dict["model"]["seq"]["skip_first"]:, :], outs)
     # Metrics
     metrics = compute_metrics(outs)
-    
+
     return metrics
 
+def eval_step(batch, state):
+    metrics = eval_step_jit_part(batch, **state["model"])
+    return metrics
 
 print("\t Test one train step and one eval step")
 
 xs, labels = next(iter(dataloader_train))
 # xs_1 = jax.device_put(xs_1)
 # xs_2 = jax.device_put(xs_2)
-key = jax.random.key(model_config["model"]["seed"])
+key = jax.random.key(config_dict["model"]["seed"])
 batch = {
     "x": xs,
     "key": key,
 }
 
-state, metrics = train_step(state, batch)
-metrics_val = eval_step(state, batch)
+state, metrics = train_step(batch, state)
+metrics_val = eval_step(batch, state)
 
 print(f"\tMetrics:")
 pprint(metrics)
-
 
 """------------------"""
 """ Logging Utils """
@@ -447,6 +448,20 @@ def activation_seq_to_img(z_seq):
     z = onp.array(z)
     return z
 
+def outs_to_image_dict(outs):
+    n_img = 16
+    img_dict = {}
+    for i, out_layer in enumerate(outs):
+        # take activations
+        z = out_layer["z"]
+        # convert to img the first n_img activations
+        z_img = activation_seq_to_img(z[:n_img])
+        # save to dict
+        for j in range(n_img):
+            img_dict[f"{i}_activity/{j}"] = z_img[j]
+
+    return img_dict
+        
 
 """------------------"""
 """ Training """
@@ -464,14 +479,10 @@ print("\nTraining")
 
 try:
 
-    for epoch in tqdm(range(model_config["training"]["epochs"])):
+    for epoch in tqdm(range(config_dict["training"]["epochs"])):
 
         epoch_metrics = {k: 0.0 for k in metrics.keys()}
         epoch_metrics_val = {k: 0.0 for k in metrics_val.keys()}
-        best_val_epoch = {
-            "epoch": None,
-            "metrics": {k: None for k in metrics_val.keys()},
-        }
 
         for batch_idx, (xs, labels) in tqdm(
             enumerate(dataloader_train), leave=False, total=len(dataloader_train)
@@ -482,7 +493,7 @@ try:
                 "x": xs,
                 "key": key,
             }
-            state, metrics = train_step(state, batch)
+            state, metrics = train_step(batch, state)
             LAST_STEP = state["step"]#.item()
 
             # Log stats for the train batch
@@ -493,14 +504,14 @@ try:
                 epoch_metrics[metric] += value
 
             # test on validation set
-            if batch_idx % model_config["validation"]["eval_interval"] == 0:
+            if batch_idx % config_dict["validation"]["interval"] == 0:
                 xs_val, labels_val = next(iter(dataloader_val))
                 key_val, _ = jax.random.split(jax.random.key(batch_idx))
                 batch_val = {
                     "x": xs_val,
                     "key": key_val,
                 }
-                metrics_val = eval_step(state, batch_val)
+                metrics_val = eval_step(batch_val, state)
                 for metric, value in metrics_val.items():
                     writer.add_scalar(
                         metric + "/val/batch", value.item(), global_step=LAST_STEP
@@ -511,7 +522,7 @@ try:
         epoch_metrics = jax.tree.map(lambda x: x / (batch_idx + 1), epoch_metrics)
         epoch_metrics_val = jax.tree.map(
             lambda x: x
-            / ((batch_idx + 1) // model_config["validation"]["eval_interval"]),
+            / ((batch_idx + 1) // config_dict["validation"]["interval"]),
             epoch_metrics_val,
         )
         epoch_step = int(LAST_STEP / (batch_idx + 1))
@@ -519,31 +530,30 @@ try:
         # Log epoch stats
         for metric, value in epoch_metrics.items():
             writer.add_scalar(
-                metric + "/train/epoch", value.item(), global_step=epoch_step
+                metric + "/train", value.item(), global_step=epoch_step
             )
         for metric, value in epoch_metrics_val.items():
             writer.add_scalar(
-                metric + "/val/epoch", value.item(), global_step=epoch_step
+                metric + "/val", value.item(), global_step=epoch_step
             )
 
         # Save checkpoint
-        if model_config["training"]["checkpoint"]["save"]:
+        if config_dict["training"]["save"]:
             # save checkpoint
             checkpoint_manager.save(
                 step=epoch_step,
-                args=orbax.checkpoint.args.StandardSave(state),
+                args=orbax.checkpoint.args.PyTreeSave(state),
             )
 
         # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
         xs_img, labels_img = next(iter(dataloader_val))
-        key_img = jax.random.key(epoch_step)
-        outs_img = forward_eval_jitted(state["variables"], xs_img, key_img)
+        outs_img = forward(xs_img, **state["model"])
         # convert to images
-        activation_imgs = activation_seq_to_img(outs_img["z"])
-        for i in range(activation_imgs.shape[0]):
+        img_dict = outs_to_image_dict(outs_img)
+        for k, v in img_dict.items():
             writer.add_image(
-                f"activation/img/{i+1}",
-                activation_imgs[i],
+                k,
+                v,
                 global_step=epoch_step,
                 dataformats="HWC",
             )
@@ -552,4 +562,12 @@ try:
 except KeyboardInterrupt:
     print("\nTraining interrupted")
 
+checkpoint_manager.save(
+    step=epoch_step,
+    args=orbax.checkpoint.args.PyTreeSave(state),
+)
+
 writer.close()
+
+print("\nDone.")
+

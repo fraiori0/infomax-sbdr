@@ -25,6 +25,7 @@ class AntiHebbianTDBase(nn.Module):
     n_input_features: int = None
     init_variance_w_forward: float = 1.0
     init_variance_w_prediction: float = 1.0
+    use_td_forward: bool = True
     
     def setup(self):
         # weights learning a TD prediction of the (binary) input
@@ -350,7 +351,10 @@ class AntiHebbianTDModule(AntiHebbianTDBase):
         # # Encode using:
         # - forward weights on the input value prediction
         # - lateral weights on the discounted sum of past activations (why not go an extra step and put also td prediction on the activations? using it as input for lateral weights? cursed? maybe does not make sense, as the next layer would learn and encode a prediction anyway)
-        z = ((self.w_f(vx_prev) + self.w_l(uz_prev)) > 0).astype(ux_prev.dtype)
+        if self.use_td_forward:
+            z = ((self.w_f(vx_prev) + self.w_l(uz_prev)) > 0).astype(ux_prev.dtype)
+        else:
+            z = ((self.w_f(ux_prev) + self.w_l(uz_prev)) > 0).astype(ux_prev.dtype)
         # # Use leaky-integrate and fire model
         # z = self.gamma * z_prev + self.w_f(self.w_td(x)) + self.w_l(act_z_prev)
         # act_z = (z > 0).astype(z_prev.dtype)

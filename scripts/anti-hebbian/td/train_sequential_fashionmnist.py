@@ -3,9 +3,9 @@ import argparse
 
 
 default_model = "td"
-default_number = "4"
+default_number = "5notd"
 
-default_cuda = "2"
+default_cuda = "1"
 
 # base folder
 base_folder = os.path.join(

@@ -23,7 +23,9 @@ models = {
     "td": {
         # "1": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
         # "2": {"name": r"$p_* = 0.07$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
-        "4": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
+        "5": {"name": r"$p_* = 0.05$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
+        "5notd": {"name": r"$p_* = 0.05 \text{noTD}$", "chkp": 10, "color": "#3627d6", "dash": "dash", "symbol": "x"},
+        # "6mnist": {"name": r"$p_* = 0.05$", "chkp": 14, "color": "#d62728", "dash": "dash", "symbol": "x"},
     },
 }
 
@@ -251,7 +253,7 @@ fig.show()
 """ Classification accuracy """
 """---------------------"""
 
-N_K = [N_OUT_UNITS, 32, 16, 8]
+N_K = [N_OUT_UNITS, int(0.1*N_OUT_UNITS), int(0.05*N_OUT_UNITS)]
 
 # For each model, train a linear SVM after sparsifying the activations by keeping only the k highest activations per sample
 

@@ -19,6 +19,7 @@ def init_params(
     """Initialize dense module parameters."""
     k1, k2 = random.split(key, 2)
     
+    # (input, output)
     W_td = jnp.zeros((n_input_features, n_input_features))
     W_f = random.normal(k2, (n_input_features, n_features)) * jnp.sqrt(
         init_scale_f / n_input_features
@@ -57,8 +58,9 @@ def forward_step(
     u_x_prev, u_z_prev = state["u_x"], state["u_z"]
     
     v_x_prev = u_x_prev @ params["W_td"]
+    # v_x_prev = u_z_prev @ params["W_td"]
     # h_f = v_x_prev @ params["W_f"] + params["b_f"]
-    h_f = u_x_prev @ params["W_f"] + params["b_f"]
+    h_f = v_x_prev @ params["W_f"] + params["b_f"]
     h_l = u_z_prev @ params["W_l"]
     z = (h_f + h_l > 0).astype(jnp.float32)
     
@@ -66,10 +68,11 @@ def forward_step(
     u_z = gamma_l * u_z_prev + z
     
     v_x = u_x @ params["W_td"]
+    # v_x = u_z @ params["W_td"]
     td_error = x + gamma_f * v_x - v_x_prev
     
     outputs = DenseOutputs(
-        z=z, u_x=u_x, u_z=u_z, x=x, u_x_prev=u_x_prev, td_error=td_error
+        z=z, u_x=u_x, u_z=u_z, x=x, u_x_prev=u_x_prev, u_z_prev=u_z_prev, td_error=td_error,
     )
     new_state = DenseState(u_x=u_x, u_z=u_z)
     

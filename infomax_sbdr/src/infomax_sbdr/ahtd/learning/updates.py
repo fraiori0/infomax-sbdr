@@ -21,12 +21,14 @@ def compute_dense_updates(
     z = outputs["z"]
     x = outputs["x"]
     u_x_prev = outputs["u_x_prev"]
+    u_z_prev = outputs["u_z_prev"]
     td_error = outputs["td_error"]
     
     # Flatten batch and time
     z_flat = z.reshape(-1, z.shape[-1])
     x_flat = x.reshape(-1, x.shape[-1])
     u_x_prev_flat = u_x_prev.reshape(-1, u_x_prev.shape[-1])
+    u_z_prev_flat = u_z_prev.reshape(-1, u_z_prev.shape[-1])
     td_error_flat = td_error.reshape(-1, td_error.shape[-1])
     n_samples = z_flat.shape[0]
     
@@ -52,10 +54,11 @@ def compute_dense_updates(
     
     # TD weights
     delta_W_td = u_x_prev_flat[..., :, None] * td_error_flat[..., None, :]
+    # delta_W_td = u_z_prev_flat[..., :, None] * td_error_flat[..., None, :]
     delta_W_td = delta_W_td.reshape(-1, *params["W_td"].shape).mean(axis=0)
     
     return DenseParams(
-        W_td=delta_W_td.T,
+        W_td=delta_W_td,
         W_f=delta_W_f,
         b_f=delta_b_f,
         W_l=delta_W_l,
@@ -69,7 +72,7 @@ def apply_dense_updates(
     lr: float,
 ) -> FrozenDict:
     """Apply updates with constraints."""
-    W_td = params["W_td"] + lr * delta_params["W_td"]
+    W_td = params["W_td"] + 0.1 * lr * delta_params["W_td"]
     W_f = params["W_f"] + lr * delta_params["W_f"]
     b_f = params["b_f"] + lr * delta_params["b_f"]
     W_l = params["W_l"] + lr * delta_params["W_l"]

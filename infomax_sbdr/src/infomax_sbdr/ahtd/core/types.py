@@ -54,6 +54,7 @@ def DenseOutputs(
         u_x: jnp.ndarray,
         u_z: jnp.ndarray,
         x: jnp.ndarray,
+        u_z_prev: jnp.ndarray,
         u_x_prev: jnp.ndarray,
         td_error: jnp.ndarray,
     ):
@@ -63,6 +64,7 @@ def DenseOutputs(
         'u_z': u_z,
         'x': x,
         'u_x_prev': u_x_prev,
+        'u_z_prev': u_z_prev,
         'td_error': td_error
     })
 

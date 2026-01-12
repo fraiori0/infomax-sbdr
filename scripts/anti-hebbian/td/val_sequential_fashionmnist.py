@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] =  "0"
+os.environ["CUDA_VISIBLE_DEVICES"] =  "3"
 
 from functools import partial
 import argparse
@@ -37,13 +37,13 @@ from sklearn.svm import LinearSVC, SVC
 
 BINARIZE = True  # whether to binarize the outputs or not
 BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is True
-BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
+BINARIZE_K = 30 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
 default_model = "td" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "4"
+default_number = "5notd"
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 5  # 102
+default_step = 10  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -119,25 +119,23 @@ dataset = sbdr.FashionMNISTPoissonDataset(
     **model_config["dataset"]["kwargs"],
 )
 
-dataset_train, dataset_val = torch.utils.data.random_split(
-    dataset,
-    [
-        1 - model_config["validation"]["split"],
-        model_config["validation"]["split"],
-    ],
-    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
+dataset_test = sbdr.FashionMNISTPoissonDataset(
+    folder_path=data_folder,
+    kind="test",
+    transform=None,
+    flatten=True,
+    **model_config["dataset"]["kwargs"],
 )
 
-
 dataloader_train = sbdr.NumpyLoader(
-    dataset_train,
+    dataset,
     batch_size=model_config["training"]["batch_size"],
     shuffle=False,
     drop_last=False,
 )
 
 dataloader_val = sbdr.NumpyLoader(
-    dataset_val,
+    dataset_test,
     batch_size=model_config["validation"]["dataloader"]["batch_size"],
     shuffle=False,
     drop_last=False,

@@ -2,6 +2,8 @@
 name = "dense_stacked_fashionmnist"
 architecture = "dense_stack"
 seed = 42
+[model.seq]
+skip_first = 5
 
 # Layer 1: 784 -> 256 features
 [[layers]]
@@ -13,12 +15,13 @@ type = "dense"
 [layers.hyperparams]
 gamma_f = 0.8
 gamma_l = 0.8
-p_target = 0.1
+p_target = 0.05
 momentum = 0.95
 lr = 0.01
 
 [training]
-n_epochs = 50
+save = true
+epochs = 50
 batch_size = 128
 shuffle = true
 seed = 42
@@ -30,6 +33,7 @@ eval_interval = 50
 [validation]
 split = 0.1
 batch_size = 128
+interval = 20
 
 [dataset]
 [dataset.kwargs]
