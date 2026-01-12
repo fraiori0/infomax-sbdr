@@ -323,15 +323,15 @@ pprint(sbdr.get_shapes(new_params))
 """ Test an epoch """
 """---------------------"""
 
-for xs, labels in dataloader_train:
-    outs = forward(xs, **model)
-    new_params = update_params(outs, **model)
-    model = sbdr.ahtd.AHTDModule(new_params, model["hyperparams"], model["config"])
-    z = outs[0]["z"]
-    td_err = outs[0]["td_error"]
-    print(z.mean(), z.std(), td_err.mean())
+# for xs, labels in dataloader_train:
+#     outs = forward(xs, **model)
+#     new_params = update_params(outs, **model)
+#     model = sbdr.ahtd.AHTDModule(new_params, model["hyperparams"], model["config"])
+#     z = outs[0]["z"]
+#     td_err = outs[0]["td_error"]
+#     print(z.mean(), z.std(), td_err.mean())
 
-exit()
+# exit()
 """---------------------"""
 """ Utils """
 """---------------------"""
@@ -499,7 +499,7 @@ try:
             # Log stats for the train batch
             for metric, value in metrics.items():
                 writer.add_scalar(
-                    metric + "/train/batch", value.item(), global_step=LAST_STEP
+                    "train/" + metric, value.item(), global_step=LAST_STEP
                 )
                 epoch_metrics[metric] += value
 
@@ -514,7 +514,7 @@ try:
                 metrics_val = eval_step(batch_val, state)
                 for metric, value in metrics_val.items():
                     writer.add_scalar(
-                        metric + "/val/batch", value.item(), global_step=LAST_STEP
+                        "val/" + metric, value.item(), global_step=LAST_STEP
                     )
                     epoch_metrics_val[metric] += value
 
@@ -530,12 +530,12 @@ try:
         # Log epoch stats
         for metric, value in epoch_metrics.items():
             writer.add_scalar(
-                metric + "/train", value.item(), global_step=epoch_step
+                metric, value.item(), global_step=epoch_step
             )
-        for metric, value in epoch_metrics_val.items():
-            writer.add_scalar(
-                metric + "/val", value.item(), global_step=epoch_step
-            )
+        # for metric, value in epoch_metrics_val.items():
+        #     writer.add_scalar(
+        #         metric + "/val", value.item(), global_step=epoch_step
+        #     )
 
         # Save checkpoint
         if config_dict["training"]["save"]:

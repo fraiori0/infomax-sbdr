@@ -24,8 +24,9 @@ models = {
         # "1": {"name": r"$p_* = 0.07$", "chkp": 5, "color": "#d62728", "dash": "dash", "symbol": "x"},
         # "2": {"name": r"$p_* = 0.07$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
         "5": {"name": r"$p_* = 0.05$", "chkp": 10, "color": "#d62728", "dash": "dash", "symbol": "x"},
-        "5notd": {"name": r"$p_* = 0.05 \text{noTD}$", "chkp": 10, "color": "#3627d6", "dash": "dash", "symbol": "x"},
+        # "5notd": {"name": r"$p_* = 0.05 \text{noTD}$", "chkp": 10, "color": "#3627d6", "dash": "dash", "symbol": "x"},
         # "6mnist": {"name": r"$p_* = 0.05$", "chkp": 14, "color": "#d62728", "dash": "dash", "symbol": "x"},
+        "ahtd": {"name": r"$p_* = 0.05 \text{AHTD}$", "chkp": 10, "color": "#c5930a", "dash": "dash", "symbol": "x"},
     },
 }
 

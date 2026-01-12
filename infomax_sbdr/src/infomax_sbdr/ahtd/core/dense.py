@@ -100,4 +100,4 @@ def forward_scan(
 
 def extract_features(outputs: FrozenDict) -> jnp.ndarray:
     """Extract features by averaging over time."""
-    return outputs.z.mean(axis=-2)
+    return outputs["z"].mean(axis=-2)
