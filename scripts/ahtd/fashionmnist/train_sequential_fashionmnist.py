@@ -3,7 +3,7 @@ import argparse
 
 
 default_model = "fashionmnist"
-default_number = "1"
+default_number = "5"
 
 default_cuda = "1"
 
@@ -76,7 +76,7 @@ from torchvision import transforms as tv_transforms
 import cv2
 from tqdm import tqdm
 
-np.set_printoptions(precision=4, suppress=True)
+np.set_printoptions(precision=3, suppress=True)
 
 # print available devices
 print(f"Available devices: {jax.devices()}")
@@ -119,7 +119,6 @@ data_folder = os.path.join(
     "fashion",
 )
 
-# create the transform
 dataset = sbdr.FashionMNISTPoissonDataset(
     folder_path=data_folder,
     kind="train",
@@ -127,6 +126,14 @@ dataset = sbdr.FashionMNISTPoissonDataset(
     flatten=True,
     **config_dict["dataset"]["kwargs"],
 )
+# # Alternative
+# dataset = sbdr.FashionMNISTDataset(
+#     folder_path=data_folder,
+#     kind="train",
+#     transform=None,
+#     flatten=False,
+#     sequential=True,
+# )
 
 dataset_train, dataset_val = torch.utils.data.random_split(
     dataset,
@@ -289,6 +296,23 @@ for k in model.keys():
 
 # test the forward scan
 xs, labels = next(iter(dataloader_train))
+# model_state = model_state = sbdr.ahtd.init_state_from_input(
+#     xs,
+#     **model,
+# )
+# pprint(sbdr.get_shapes(model_state))
+# model_state = sbdr.ahtd.init_state_from_input(
+#         xs,
+#         **model,
+#     )
+
+# pprint(sbdr.get_shapes(model_state))
+
+# outs = sbdr.ahtd.forward_stack(
+#         model_state,
+#         xs,
+#         **model,
+#     )
 outs = forward(xs, **model)
 
 print(f"\tInput shape: {xs.shape}")
@@ -328,10 +352,11 @@ pprint(sbdr.get_shapes(new_params))
 #     new_params = update_params(outs, **model)
 #     model = sbdr.ahtd.AHTDModule(new_params, model["hyperparams"], model["config"])
 #     z = outs[0]["z"]
-#     td_err = outs[0]["td_error"]
-#     print(z.mean(), z.std(), td_err.mean())
-
+#     td_err_f = outs[0]["td_error_f"]
+#     td_err_l = outs[0]["td_error_l"]
+#     print(f"{z.mean()}, ({z.std()}), {td_err_f.mean()}, {td_err_f.mean()}")
 # exit()
+
 """---------------------"""
 """ Utils """
 """---------------------"""
@@ -356,7 +381,8 @@ def compute_metrics(outs):
         qs_s_val = np.quantile(s_avg, QS)
 
         # compute average td error
-        td_err = np.abs(out_layer["td_error"]).mean()
+        td_err_f = np.abs(out_layer["td_error_f"]).mean()
+        td_err_l = np.abs(out_layer["td_error_l"]).mean()
 
         metrics.update(
             {f"{i}_unit/{k}": v for k, v in zip(Q_KEYS, qs_z_val)}
@@ -365,7 +391,8 @@ def compute_metrics(outs):
             {f"{i}_sample/{k}": v for k, v in zip(Q_KEYS, qs_s_val)}
         )
 
-        metrics[f"td_error/{i}"] = td_err
+        metrics[f"td_error/{i}/f"] = td_err_f
+        metrics[f"td_error/{i}/l"] = td_err_l
 
     return metrics
 
@@ -454,11 +481,17 @@ def outs_to_image_dict(outs):
     for i, out_layer in enumerate(outs):
         # take activations
         z = out_layer["z"]
+        td_error_l = out_layer["td_error_f"]
         # convert to img the first n_img activations
-        z_img = activation_seq_to_img(z[:n_img])
+        z_img = z[:n_img]
+        z_img = activation_seq_to_img(z_img)
+        td_img = td_error_l[:n_img].mean(axis=-2).reshape((n_img, int(np.sqrt(td_error_l.shape[-1])), int(np.sqrt(td_error_l.shape[-1]))))
+        # td_img = td_error_l[:n_img]
+        td_img = activation_seq_to_img(td_img)
         # save to dict
         for j in range(n_img):
             img_dict[f"{i}_activity/{j}"] = z_img[j]
+            img_dict[f"{i}_td_img/{j}"] = td_img[j]
 
     return img_dict
         

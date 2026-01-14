@@ -3,9 +3,10 @@ import argparse
 
 
 default_model = "fashionmnist"
-default_number = "1"
+default_number = "5"
 default_checkpoint_subfolder = "manual_select" # 
 default_step = 10
+layer_features = (-2,)#-1,)
 
 default_cuda = "2"
 
@@ -121,22 +122,41 @@ data_folder = os.path.join(
     "fashion",
 )
 
-# create the transform
-dataset = sbdr.FashionMNISTPoissonDataset(
-    folder_path=data_folder,
-    kind="train",
-    transform=None,
-    flatten=True,
-    **config_dict["dataset"]["kwargs"],
-)
 
-dataset_test = sbdr.FashionMNISTPoissonDataset(
-    folder_path=data_folder,
-    kind="test",
-    transform=None,
-    flatten=True,
-    **config_dict["dataset"]["kwargs"],
-)
+poisson_data = True
+if poisson_data:
+
+    dataset = sbdr.FashionMNISTPoissonDataset(
+        folder_path=data_folder,
+        kind="train",
+        transform=None,
+        flatten=True,
+        **config_dict["dataset"]["kwargs"],
+    )
+    dataset_test = sbdr.FashionMNISTPoissonDataset(
+        folder_path=data_folder,
+        kind="test",
+        transform=None,
+        flatten=True,
+        **config_dict["dataset"]["kwargs"],
+    )
+else:
+    # Alternative
+    dataset = sbdr.FashionMNISTDataset(
+        folder_path=data_folder,
+        kind="train",
+        transform=None,
+        flatten=False,
+        sequential=True,
+    )
+
+    dataset_test = sbdr.FashionMNISTDataset(
+        folder_path=data_folder,
+        kind="test",
+        transform=None,
+        flatten=False,
+        sequential=True,
+    )
 
 dataloader_train = sbdr.NumpyLoader(
     dataset,
@@ -249,17 +269,13 @@ state = {
 #     args=orbax.checkpoint.args.PyTreeSave(state),
 # )
 
-LAST_STEP = checkpoint_manager.latest_step()
-if LAST_STEP is None:
-    LAST_STEP = 0
-else:
-    state = checkpoint_manager.restore(
-        step=LAST_STEP, args=orbax.checkpoint.args.PyTreeRestore(state)
-    )
+state = checkpoint_manager.restore(
+    step=default_step, args=orbax.checkpoint.args.PyTreeRestore(state)
+)
 
 model = state["model"].copy()
 
-print(f"\tLast step: {LAST_STEP}")
+print(f"\tChkp step: {default_step}")
 
 
 """---------------------"""
@@ -276,13 +292,15 @@ def forward(xs, params, hyperparams, config):
         hyperparams,
         config,
     )
-    return sbdr.ahtd.forward_stack(
+    outs = sbdr.ahtd.forward_stack(
         model_state,
         xs,
         params,
         hyperparams,
         config,
     )
+    outs = jax.tree.map(lambda x: x[..., config_dict["model"]["seq"]["skip_first"]:, :], outs)
+    return outs
 
 for k in model.keys():
     print(k, type(model[k][0]))
@@ -333,7 +351,7 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_train), total=len(dataloader_tr
     z = sbdr.ahtd.extract_features(
         model_state,
         x_seq = xs,
-        layer_idx = -1,
+        layer_idxs = layer_features,
         **model,
 
     )
@@ -386,7 +404,7 @@ for i, (xs, labels) in tqdm(enumerate(dataloader_test), total=len(dataloader_tes
     z = sbdr.ahtd.extract_features(
         model_state,
         x_seq = xs,
-        layer_idx = -1,
+        layer_idxs = layer_features,
         **model,
     )
     # Record temporal average of output

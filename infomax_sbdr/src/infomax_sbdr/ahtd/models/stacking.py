@@ -41,7 +41,7 @@ def get_update_fn(module_type: str) -> Tuple[Callable, Callable]:
     else:
         raise ValueError(f"Unknown module type: {module_type}")
 
-@partial(jit, static_argnums=(2, 3))
+# @partial(jit, static_argnums=(2, 3))
 def init_state_from_input(
     x: jnp.ndarray,
     params: Tuple[FrozenDict],
@@ -49,17 +49,22 @@ def init_state_from_input(
     config: Tuple[FrozenDict],
 ) -> FrozenDict:
     """Initialize module state from input tensor, for each module in the stack."""
+
     states = []
     for i in range(len(params)):
+
         module_type = config[i]["type"]
 
         if module_type == "dense":
             batch_shape = x.shape[:-2]
+            time_length = x.shape[-2]
             n_input = x.shape[-1]
             n_output = params[i]["W_f"].shape[-1]
             states.append(dense.init_state(
                 batch_shape, n_input, n_output, hyperparams[i]["gamma_f"], hyperparams[i]["gamma_l"], hyperparams[i]["p_target"]
             ))
+            # set "input" for next layer
+            x = jnp.empty((*states[-1]["u_z"].shape[:-1], time_length, states[-1]["u_z"].shape[-1]))
         
         elif module_type == "conv1d":
             batch_shape = x.shape[:-3]
@@ -70,6 +75,8 @@ def init_state_from_input(
                 batch_shape, time_length, in_channels, out_channels,
                 hyperparams[i]["gamma_f"], hyperparams[i]["gamma_l"], hyperparams[i]["p_target"]
             ))
+            # set "input" for next layer
+            x = states[-1]["u_z"].copy()
         
         elif module_type == "conv2d":
             batch_shape = x.shape[:-4]
@@ -80,11 +87,13 @@ def init_state_from_input(
                 batch_shape, height, width, in_channels, out_channels,
                 hyperparams[i]["gamma_f"], hyperparams[i]["gamma_l"], hyperparams[i]["p_target"]
             ))
+            # set "input" for next layer
+            x = states[-1]["u_z"].copy()
         
         else:
             raise ValueError(f"Unknown module type: {module_type}")
         
-        return tuple(states)
+    return tuple(states)
 
 @partial(jit, static_argnums=(3, 4))
 def forward_stack(
@@ -149,22 +158,27 @@ def extract_features(
     params: Tuple[FrozenDict],
     hyperparams: Tuple[FrozenDict],
     config: Tuple[FrozenDict],
-    layer_idx: int = -1,
+    layer_idxs: Tuple[int] = (-1,),
 ) -> jnp.ndarray:
     
     """Extract features from a specific layer."""
     outs = forward_stack(state, x_seq, params, hyperparams, config)
-    out = outs[layer_idx]
-    module_type = config[layer_idx]['type']
-    
-    if module_type == "dense":
-        return dense.extract_features(out)
-    elif module_type == "conv1d":
-        return conv1d.extract_features(out)
-    elif module_type == "conv2d":
-        return conv2d.extract_features(out)
-    else:
-        raise ValueError(f"Unknown module type: {module_type}")
+
+    y = []
+    for l in layer_idxs:
+        out = outs[l]
+        module_type = config[l]['type']
+        
+        if module_type == "dense":
+            y.append(dense.extract_features(out))
+        elif module_type == "conv1d":
+            y.append(conv1d.extract_features(out))
+        elif module_type == "conv2d":
+            y.append(conv2d.extract_features(out))
+        else:
+            raise ValueError(f"Unknown module type: {module_type}")
+        
+    return jnp.concatenate(y, axis=-1)
 
 
 def init_conv2d_stack(

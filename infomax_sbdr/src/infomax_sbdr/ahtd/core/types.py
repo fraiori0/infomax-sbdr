@@ -24,14 +24,20 @@ def HyperParams(
 
 # Dense module types
 def DenseParams(
-        W_td: jnp.ndarray,  # (n_features, n_input_features)
+        W_f_td: jnp.ndarray,  # (n_input_features, n_input_features)
+        b_f_td: jnp.ndarray,  # (n_input_features,)
+        W_l_td: jnp.ndarray,  # (n_features, n_input_features)
+        b_l_td: jnp.ndarray,  # (n_input_features,)
         W_f: jnp.ndarray,   # (n_input_features, n_features)
         b_f: jnp.ndarray,   # (n_features,)
         W_l: jnp.ndarray,   # (n_features, n_features)
         mu: jnp.ndarray,    # (n_features, n_features)
     ):
     return FrozenDict({
-        'W_td': W_td,
+        'W_f_td': W_f_td,
+        'b_f_td': b_f_td,
+        'W_l_td': W_l_td,
+        'b_l_td': b_l_td,
         'W_f': W_f,
         'b_f': b_f,
         'W_l': W_l,
@@ -42,10 +48,12 @@ def DenseParams(
 def DenseState(
         u_x: jnp.ndarray,
         u_z: jnp.ndarray,
+        u_e: jnp.ndarray,
     ):
     return FrozenDict({
         'u_x': u_x,
         'u_z': u_z,
+        'u_e': u_e,
     })
 
 
@@ -53,19 +61,23 @@ def DenseOutputs(
         z: jnp.ndarray,
         u_x: jnp.ndarray,
         u_z: jnp.ndarray,
-        x: jnp.ndarray,
-        u_z_prev: jnp.ndarray,
+        input_f: jnp.ndarray,
+        input_l: jnp.ndarray,
         u_x_prev: jnp.ndarray,
-        td_error: jnp.ndarray,
+        u_z_prev: jnp.ndarray,
+        td_error_f: jnp.ndarray,
+        td_error_l: jnp.ndarray,
     ):
     return FrozenDict({
         'z': z,
         'u_x': u_x,
         'u_z': u_z,
-        'x': x,
+        'input_f': input_f,
+        'input_l': input_l,
         'u_x_prev': u_x_prev,
         'u_z_prev': u_z_prev,
-        'td_error': td_error
+        'td_error_f': td_error_f,
+        'td_error_l': td_error_l,
     })
 
 
