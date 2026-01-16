@@ -1,0 +1,2 @@
+- log(sim()) critic i.e. "modified" flo
+- output does not become sparse

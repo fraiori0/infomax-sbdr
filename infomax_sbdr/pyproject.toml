@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "infomax_sbdr"
+version = "0.0"
+requires-python = ">=3.10"
+authors = [
+  {name = "Francesco Iori", email = "fraiori@hotmail.it"},
+]
+maintainers = [
+  {name = "Francesco Iori", email = "fraiori@hotmail.it"},
+]
+description = "Mutual Information Constrastive Estimators for Learning of Sparse Binary Distributed Representations"
+
+[project.urls]
+# Homepage = "https://example.com"
+# Documentation = "https://readthedocs.org"
+Repository = "https://github.com/fraiori0/infomax-sbdr.git"

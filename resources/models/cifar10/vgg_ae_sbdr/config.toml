@@ -1,0 +1,56 @@
+[model]
+type = "VGGFLOAutoEncoder"
+seed = 68
+activation = "leaky_relu"
+out_activation = "sigmoid"
+[model.kwargs]
+out_features = 256
+kernel_features = [32, 64, 128]
+deconv_in_features = 2048
+deconv_kernel_features = [64, 32, 3]
+use_batchnorm = true
+use_dropout = true
+dropout_rates = [0.2, 0.3, 0.3]
+# training = true
+   
+
+[dataset]
+flatten = false
+[dataset.transform]
+type="offsetscale"
+[dataset.transform.kwargs]
+offset = [0.4914, 0.4822, 0.4465]
+scale = [0.2470, 0.2435, 0.2616]
+
+[training]
+epochs = 1000
+batch_size = 128
+shuffle = true
+# drop the last batch to avoid recompoiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+save = true
+save_interval = 2
+log_interval = 1
+[training.checkpoint]
+save = false
+save_interval = 50
+max_to_keep = 5
+
+[training.early_stopping]
+patience = 20
+val_split = 0.1
+
+[training.loss]
+alpha = 0.5
+mse_scale = 10.0
+weight_decay = 1e-4
+[training.loss.sim_fn]
+type = "jaccard"
+[training.loss.sim_fn.kwargs]
+eps = 1.0e0
+
+[training.optimizer]
+type = "adam"
+[training.optimizer.kwargs]
+learning_rate = 0.001

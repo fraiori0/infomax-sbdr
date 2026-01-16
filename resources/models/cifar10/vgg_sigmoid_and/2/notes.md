@@ -1,0 +1,3 @@
+- using original flo
+- performs very bad, maybe adding L1 regularization is necessary
+- and possibly L2 on the weights as well? but maybe tat would be too many things added

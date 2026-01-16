@@ -1,0 +1,60 @@
+[model]
+type = "AntiHebbianXORModule"
+seed = 41
+[model.kwargs]
+n_features = 512
+p_target = 0.075
+momentum = 0.97
+init_variance_w_forward = 1.0
+init_variance_w_lateral = 1.0
+bias_init_value = 0.0
+use_dropout = true
+dropout_rate = 0.2
+# training = true
+   
+[dataset]
+[dataset.transform.normalization]
+mean = [0.2860]
+std = [0.3530]
+[dataset.transform.resized_crop]
+size = 28
+scale = [0.9, 1.0]
+ratio = [0.99, 1.01]
+[dataset.transform.flip]
+p = 0.5
+[dataset.transform.grayscale]
+p = 0.1
+[dataset.transform.color_jitter]
+brightness = 0.15
+contrast = 0.15
+saturation = 0.15
+hue = 0.15
+
+[training]
+epochs = 100
+batch_size = 128
+learning_rate = 0.003
+
+[training.checkpoint]
+save = true
+save_interval = 5 # epochs
+max_to_keep = 12
+
+[training.dataloader]
+shuffle = true
+# drop the last batch to avoid recompiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+
+[validation]
+split = 0.16
+eval_interval = 12
+[validation.dataloader]
+batch_size = 256
+[validation.sim_fn]
+type = "log_and"
+quantile = 0.9
+[validation.sim_fn.kwargs]
+eps = 1.0e-2
+
+

@@ -1,0 +1,2 @@
+- log(sim()) critic i.e. "modified" flo, same as the first test with jaccard index
+- performs not so bad but also not so good

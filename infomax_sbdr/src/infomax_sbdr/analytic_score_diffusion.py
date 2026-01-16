@@ -1,0 +1,444 @@
+import os
+import jax
+import jax.numpy as np
+from jax import jit, vmap
+from functools import partial
+
+
+@jit
+def logsumexp_masked(x, mask):
+    # x : (*batch_dims, k)
+    # mask : (*batch_dims, k, features)
+    # out of shape (*batch_dims, features), instead of (*batch_dims) as would be expected
+    # for standard log-sum-exp
+    x_max = x.max(-1)
+    lse = np.log(
+        (
+            (np.exp(x - x_max[..., None]))[..., None] * mask
+        ).sum(-2)
+        + 1e-8
+    )
+    return lse + x_max[..., None]
+
+@jit
+def cosine_schedule(t: float) -> float:
+    """Cosine noise schedule."""
+    s = 0.008
+    f_t = np.cos((t + s) / (1 + s) * np.pi / 2) ** 2
+    f_0 = np.cos(s / (1 + s) * np.pi / 2) ** 2
+    return f_t / f_0
+
+@jit
+def linear_schedule(t: float) -> float:
+    """Linear noise schedule."""
+    return 1.0 - t
+
+
+@jit
+def compute_posterior_weights(
+    phi: np.ndarray,        # Current state (*batch_dims, features)
+    ks: np.ndarray,         # Data points (*batch_dims, k, features)
+    alpha_bar_t: float      # Noise schedule value
+) -> np.ndarray:
+    """
+    Compute posterior weights W_t(φ|ϕ) for all training points.
+
+    Returns:
+        Posterior weights, shape (batch_size, k)
+    """
+    # Compute shrunk means: √ᾱ_t φ
+    means = np.sqrt(alpha_bar_t) * ks  # (*batch_dims, k, features)
+    var = 1.0 - alpha_bar_t
+
+    # Compute squared distances: ||ϕ - √ᾱ_t φ||²
+    diff = phi[..., None, :] - means  # (*batch_dims, k, features)
+    sq_dist = np.sum(diff ** 2, axis=-1)       # (*batch_dims, k)
+
+    # Compute log-likelihoods (unnormalized)
+    log_likelihoods = -0.5 * sq_dist / var # (*batch_dims, k)
+
+    # Normalize using jax.nn log-sum-exp for numerical stability
+    log_weights = log_likelihoods - jax.scipy.special.logsumexp(
+        log_likelihoods, axis=-1, keepdims=True
+    )
+
+    return np.exp(log_weights)
+
+@jit
+def compute_posterior_weights_masked(
+    phi: np.ndarray,        # Current state (*batch_dims, features)
+    ks: np.ndarray,         # Data points (*batch_dims, k, features)
+    mask: np.ndarray,       # Boolean mask of features that each point affects/is affected by (*batch_dims, k, features)
+    alpha_bar_t: float      # Noise schedule value
+) -> np.ndarray:
+    """
+    Compute posterior weights W_t(φ|ϕ) for all training points.
+    However, here we compute the weights _per-features_, according to the mask
+    i.e., different features will have different weights, depending on the mask
+
+    Returns:
+        Posterior weights, shape (batch_size, k, features)
+    """
+    # Compute shrunk means: √ᾱ_t φ
+    means = np.sqrt(alpha_bar_t) * ks  # (*batch_dims, k, features)
+    var = np.clip(1.0 - alpha_bar_t, 1e-8, None)
+
+    # Compute squared distances: ||ϕ - √ᾱ_t φ||²
+    diff = phi[..., None, :] - means  # (*batch_dims, k, features)
+    # mask the differences and rescale by sqrt of non-zero terms in the mask
+    # to account for the fact that centroids may be connected to a different number of input features
+    diff = (mask * diff)
+    norm_val = np.sqrt(np.count_nonzero(mask, axis=-1))
+    norm_val = norm_val/(norm_val.max(-1, keepdims=True))
+    diff = diff/(norm_val[..., None])      # (*batch_dims, k)
+    sq_dist = np.sum(diff ** 2, axis=-1)
+
+    # Compute log-likelihoods (unnormalized)
+    # note, here we have a different log-likelihood per each features, computed only on
+    # the data points/centroids connected to such feature
+    log_likelihoods = -0.5 * sq_dist / var # (*batch_dims, k)
+
+    # normalize using log-sum-exp trick (implemented manually, to match)
+    # per feature, i.e., each feature will have positive weights only for its connected data points, and 0 otherwise
+    log_weights = log_likelihoods[..., None] - logsumexp_masked(log_likelihoods, mask)[..., None, :]
+    weights = np.exp(log_weights)
+    weights = mask * weights
+    return weights
+
+@jit
+def ideal_score(
+    phi: np.ndarray,
+    ks: np.ndarray,
+    alpha_bar_t: float
+) -> np.ndarray:
+    """
+    Compute the ideal score function analytically.
+
+    Returns:
+        Score estimates, shape (*batch_dims, features)
+    """
+    # Compute posterior weights
+    weights = compute_posterior_weights(phi, ks, alpha_bar_t) # (*batch_dims, k)
+
+    # Compute shrunk training points
+    shrunk_data = np.sqrt(alpha_bar_t) * ks # (*batch_dims, k, features)
+
+    # Compute differences: ϕ - √ᾱ_t φ
+    diff = phi[..., None, :] - shrunk_data # (*batch_dims, k, features)
+
+    # Weighted sum
+    weighted_diff = weights[..., None] * diff # (*batch_dims, k, features)
+    sum_weighted_diff = np.sum(weighted_diff, axis=-2) # (*batch_dims, features)
+
+    # Score: (1/(1-ᾱ_t)) * Σ (√ᾱ_t φ - ϕ) W_t
+    # Which equals: -(1/(1-ᾱ_t)) * Σ (ϕ - √ᾱ_t φ) W_t
+    variance = 1.0 - alpha_bar_t 
+    score = -sum_weighted_diff / variance # (*batch_dims, features)
+
+    return score
+
+@jit
+def ideal_score_masked(
+    phi: np.ndarray,
+    ks: np.ndarray,
+    mask: np.ndarray,
+    alpha_bar_t: float
+) -> np.ndarray:
+    """
+    Compute the ideal score function analytically, using partially masked (in feature space) posterior weights.
+
+    Returns:
+        Score estimates, shape (*batch_dims, features)
+    """
+    # Compute posterior weights
+    weights = compute_posterior_weights_masked(phi, ks, mask, alpha_bar_t) # (*batch_dims, k, features)
+
+    # Compute shrunk training points
+    shrunk_data = np.sqrt(alpha_bar_t) * ks # (*batch_dims, k, features)
+
+    # Compute differences: ϕ - √ᾱ_t φ
+    diff = phi[..., None, :] - shrunk_data # (*batch_dims, k, features)
+
+    # Weighted sum
+    weighted_diff = weights * diff # (*batch_dims, k, features)
+    sum_weighted_diff = np.sum(weighted_diff, axis=-2) # (*batch_dims, features)
+
+    # Score: (1/(1-ᾱ_t)) * Σ (√ᾱ_t φ - ϕ) W_t
+    # Which equals: -(1/(1-ᾱ_t)) * Σ (ϕ - √ᾱ_t φ) W_t
+    variance = 1.0 - alpha_bar_t 
+    score = -sum_weighted_diff / variance # (*batch_dims, features)
+
+    return score
+
+
+@partial(jit, static_argnums=(1,))
+def gamma_fn(t: float, alpha_bar_fn=cosine_schedule) -> float:
+    """Compute γ_t = -∂_t ᾱ_t / (2 ᾱ_t) using finite differences."""
+    dt = 1e-5
+    alpha_t = alpha_bar_fn(t)
+    alpha_t_plus = alpha_bar_fn(t + dt)
+    d_alpha = (alpha_t_plus - alpha_t) / dt
+    gamma = -d_alpha / (2.0 * alpha_t + 1e-8)
+    return gamma
+
+@partial(jit, static_argnums=(4,))
+def reverse_diffusion_step(
+    phi_t: np.ndarray, # (*batch_dims, features)
+    ks: np.ndarray, # (*batch_dims, k, features)
+    t: float,
+    dt: float,
+    alpha_bar_fn=cosine_schedule,
+):
+    """
+    Single step of reverse diffusion.
+
+    Returns:
+        - Next state ϕ_{t-dt}
+        - Statistics dictionary
+    """
+    alpha_bar_t = alpha_bar_fn(t)
+    score_t = ideal_score(phi_t, ks, alpha_bar_t) # (*batch_dims, features)
+    gamma_t = gamma_fn(t)
+
+    # CORRECTED UPDATE: Note the PLUS sign!
+    # ϕ_{t-dt} = ϕ_t + γ_t·dt·(ϕ_t + s_t(ϕ_t))
+    phi_t_minus_dt = phi_t + gamma_t * dt * (phi_t + score_t) # (*batch_dims, features)
+
+    # Collect statistics
+    aux = {
+        't': t,
+        'alpha_bar': alpha_bar_t,
+        'gamma': gamma_t,
+        'mean': np.mean(phi_t, axis=-1),
+        'std': np.std(phi_t, axis=-1),
+        'min': np.min(phi_t, axis=-1),
+        'max': np.max(phi_t, axis=-1),
+        'score_norm': np.linalg.norm(score_t, axis=-1),
+    }
+
+    return phi_t_minus_dt, aux
+
+
+@partial(jit, static_argnums=(5,))
+def reverse_diffusion_step_masked(
+    phi_t: np.ndarray, # (*batch_dims, features)
+    ks: np.ndarray, # (*batch_dims, k, features)
+    mask: np.ndarray, # (*batch_dims, k, features)
+    t: float,
+    dt: float,
+    alpha_bar_fn=cosine_schedule,
+):
+    """
+    Single step of reverse diffusion.
+
+    Returns:
+        - Next state ϕ_{t-dt}
+        - Statistics dictionary
+    """
+    alpha_bar_t = alpha_bar_fn(t)
+    score_t = ideal_score_masked(phi_t, ks, mask, alpha_bar_t) # (*batch_dims, features)
+    gamma_t = gamma_fn(t)
+
+    # CORRECTED UPDATE: Note the PLUS sign!
+    # ϕ_{t-dt} = ϕ_t + γ_t·dt·(ϕ_t + s_t(ϕ_t))
+    phi_t_minus_dt = phi_t + gamma_t * dt * (phi_t + score_t) # (*batch_dims, features)
+
+    # Collect statistics
+    # Collect statistics
+    aux = {
+        't': t,
+        'alpha_bar': alpha_bar_t,
+        'gamma': gamma_t,
+        'mean': np.mean(phi_t, axis=-1),
+        'std': np.std(phi_t, axis=-1),
+        'min': np.min(phi_t, axis=-1),
+        'max': np.max(phi_t, axis=-1),
+        'score_norm': np.linalg.norm(score_t, axis=-1),
+    }
+
+    return phi_t_minus_dt, aux
+
+
+def diffuse_with_subsets(
+    key: jax.random.PRNGKey,
+    phi_T: np.ndarray,
+    ks: np.ndarray,
+    T_max: float = 1.0,
+    num_steps: int = 100,
+):
+    """
+    Generate samples using subset-based ideal score machine, computing an analytic score function
+    from the given points (ks).
+
+    Args:
+        key: Random key
+        ks: Array of shape (*batch_dims, features), points element along the last axis of the array,  to use to compute the analytic score function
+        num_steps: Number of diffusion steps
+        T_max: Maximum diffusion time
+
+    Returns:
+        - Trajectory: array of shape (*batch_dims, num_steps+1, features)
+        - Statistics: list of stat dictionaries for each step
+    """
+
+    # Time discretization
+    dt = T_max / num_steps
+    times = np.linspace(T_max, 0, num_steps + 1)
+
+    # Define a function to scan over time with jax.lax.scan
+    def f_scan(carry, input):
+        phi_t = carry # (*batch_dims, features)
+        t = input
+        phi_t, stats = reverse_diffusion_step(phi_t, ks, t, dt)
+        return phi_t, (phi_t, stats)
+
+    # Scan over time
+    phi_0, (trajectory, statistics) = jax.lax.scan(
+        f_scan,
+        phi_T,
+        times,
+    )
+
+    return trajectory, statistics
+
+
+def diffuse_with_subsets_masked(
+    key: jax.random.PRNGKey,
+    phi_T: np.ndarray,
+    ks: np.ndarray,
+    mask:  np.ndarray,
+    T_max: float = 1.0,
+    num_steps: int = 100,
+):
+    """
+    Generate samples using subset-based ideal score machine, computing an analytic score function
+    from the given points (ks).
+
+    Args:
+        key: Random key
+        ks: Array of shape (*batch_dims, k, features), points element along the last axis of the array,  to use to compute the analytic score function
+        mask: Boolean mask of features that each point affects/is affected by, shape (*batch_dims, k, features)
+        num_steps: Number of diffusion steps
+        T_max: Maximum diffusion time
+
+    Returns:
+        - Trajectory: array of shape (*batch_dims, num_steps+1, features)
+        - Statistics: list of stat dictionaries for each step
+    """
+
+    # Time discretization
+    dt = T_max / num_steps
+    times = np.linspace(T_max, 0, num_steps + 1)
+
+    # Define a function to scan over time with jax.lax.scan
+    def f_scan(carry, input):
+        phi_t = carry # (*batch_dims, features)
+        t = input
+        phi_t, stats = reverse_diffusion_step_masked(phi_t, ks, mask, t, dt)
+        return phi_t, (phi_t, stats)
+
+    # Scan over time
+    phi_0, (trajectory, statistics) = jax.lax.scan(
+        f_scan,
+        phi_T,
+        times,
+    )
+
+    return trajectory, statistics
+
+@partial(jit, static_argnums=(2,))
+def topk_centroids(xs, cs, k):
+    # return the k centroid of cs closest to x
+    # xs : (*batch_dims, features)
+    # cs : (*batch_dims, n_centers, features)
+
+    ds_squared = ((xs[..., None, :]-cs)**2).sum(-1)
+    idx_topk = jax.lax.top_k(-ds_squared, k=k)[1]
+
+    cs_topk = cs[..., idx_topk, :]
+
+    # return also a aux with a k-hot encoding of the centroids, shape (*batch_dims, n_centers)
+    z = np.zeros((*xs.shape[:-1], cs.shape[-2]), dtype=np.float32)
+    z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
+
+    aux = {
+        "topk_i": idx_topk,
+        "d": np.sqrt(ds_squared),
+        "z": z,
+    }
+    return cs_topk, aux
+
+
+@partial(jit, static_argnums=(2,))
+def topk_centroids_nomax(xs, cs, k):
+    # return the k centroid of cs closest to x, but without the actual closest one
+    # xs : (*batch_dims, features)
+    # cs : (*batch_dims, n_centers, features)
+
+    ds_squared = ((xs[..., None, :]-cs)**2).sum(-1)
+    # note, argsort sort by ascending order, so the first k element are the lowest one (i.e., the closest)
+    idx_topk = np.argsort(ds_squared, axis=-1)[..., :k]
+    # remove the index of the closest center
+    idx_topk = idx_topk[..., 1:]
+
+
+    cs_topk = cs[..., idx_topk, :]
+
+    # return also a aux with a k-hot encoding of the centroids, shape (*batch_dims, n_centers)
+    z = np.zeros((*xs.shape[:-1], cs.shape[-2]), dtype=np.float32)
+    z = np.put_along_axis(z, idx_topk, 1.0, axis=-1, inplace=False)
+
+    aux = {
+        "topk_i": idx_topk,
+        "d": np.sqrt(ds_squared),
+        "z": z,
+    }
+    return cs_topk, aux
+
+
+def diffuse_topk(
+    key: jax.random.PRNGKey,
+    phi_T: np.ndarray,
+    ks: np.ndarray,
+    T_max: float = 1.0,
+    num_steps: int = 100,
+    topk: int = 10,
+):
+    """
+    Generate samples using subset-based ideal score machine, computing an analytic score function
+    from the given points (ks).
+
+    Args:
+        key: Random key
+        ks: Array of shape (*batch_dims, features), points to use to compute the analytic score function
+        num_steps: Number of diffusion steps
+        T_max: Maximum diffusion time
+
+    Returns:
+        - Trajectory: array of shape (*batch_dims, num_steps+1, features)
+        - Statistics: list of stat dictionaries for each step
+    """
+
+    # Time discretization
+    dt = T_max / num_steps
+    times = np.linspace(T_max, 0, num_steps + 1)
+
+    # Define a function to scan over time with jax.lax.scan
+    def f_scan(carry, input):
+        phi_t = carry # (*batch_dims, features)
+        t = input
+        # Compute the closest centers
+        cs_topk, _ = topk_centroids_nomax(phi_t, ks, topk)
+        phi_t, stats = reverse_diffusion_step(phi_t, cs_topk, t, dt)
+        return phi_t, (phi_t, stats)
+
+    # Scan over time
+    phi_0, (trajectory, statistics) = jax.lax.scan(
+        f_scan,
+        phi_T,
+        times,
+    )
+
+    return trajectory, statistics
+
+
