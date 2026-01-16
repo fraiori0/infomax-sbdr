@@ -1,3 +1,0 @@
-- using modified flo, without the exponential
-- using cosine_distance on unit norm outputs
-- normalize using bias of 1e-3

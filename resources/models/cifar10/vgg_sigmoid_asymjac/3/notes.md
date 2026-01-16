@@ -1,2 +1,0 @@
-- standard flo model, using the custom flo without exponential (i.e., g = ln(p(x|y), exponent in FLO cancels out))
-- asymmetric jaccard similarity with bias of 1, weight decay to 1.0e-5

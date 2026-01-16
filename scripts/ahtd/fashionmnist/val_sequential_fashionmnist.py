@@ -3,10 +3,11 @@ import argparse
 
 
 default_model = "fashionmnist"
-default_number = "5"
+default_number = ""
+poisson_data = True
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 10
-layer_features = (-2,)#-1,)
+default_step = 50
+layer_features = (-2, -1,)
 
 default_cuda = "2"
 
@@ -123,7 +124,6 @@ data_folder = os.path.join(
 )
 
 
-poisson_data = True
 if poisson_data:
 
     dataset = sbdr.FashionMNISTPoissonDataset(

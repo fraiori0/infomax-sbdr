@@ -1,1 +1,0 @@
-- and with a bias of 1, used with the flo estimator without exponentiation (i.e., like a log cancels out)

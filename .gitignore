@@ -1,8 +1,10 @@
 checkpoints/
+activations/
+logs/
 
 pretrained/
 
-cifar100/
+datasets/
 
 __pycache__/
 *.pyc
