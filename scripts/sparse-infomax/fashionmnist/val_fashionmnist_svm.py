@@ -35,15 +35,15 @@ from sklearn.svm import LinearSVC
 
 # np.set_printoptions(precision=4, suppress=True)
 
-BINARIZE = True  # whether to binarize the outputs or not
+BINARIZE = False  # whether to binarize the outputs or not
 BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is True
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "dense_sigmoid_logand" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "4"
+default_model = "dense_ReLU_logand" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
+default_number = "1"  # "1"  #
 default_checkpoint_subfolder = "manual_select" # 
-default_step = 145  # 102
+default_step = 26  # 102
 
 # base folder
 base_folder = os.path.join(
@@ -451,7 +451,7 @@ onp.savez_compressed(
     labels_onehot_val=onp.array(labels_onehot_val),
 )
 
-exit()
+# exit()
 
 
 """---------------------"""

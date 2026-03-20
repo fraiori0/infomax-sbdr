@@ -32,6 +32,8 @@ config_activation_dict = {
     "identity": lambda x: x,
     "mish": jax.nn.mish,
     "sigmoid_ste": ut.sigmoid_ste,
+    "threshold_softgradient": ut.threshold_softgradient,
+    "hard_threshold": ut.hard_threshold,
 
 }
 

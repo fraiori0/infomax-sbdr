@@ -4,7 +4,6 @@ from jax import jit, grad, vmap
 import flax.linen as nn
 from typing import Sequence, Callable
 from functools import partial
-from infomax_sbdr.utils import threshold_softgradient
 
 
 class DenseFLO(nn.Module):
@@ -38,9 +37,8 @@ class DenseFLO(nn.Module):
                 layers.append(nn.Dropout(rate=self.dropout_rate, deterministic=not self.training))
 
         layers.append(nn.Dense(features=self.out_features))
-        # layers.append(self.out_activation_fn)
+        layers.append(self.out_activation_fn)
         self.layers = nn.Sequential(layers)
-
 
         negpmi_layers = []
         for f in self.hid_features_negpmi:
@@ -55,16 +53,12 @@ class DenseFLO(nn.Module):
         # if there were multiple in the original data (like image C, H, W)
 
         # apply the feedforward weights
-        a = self.layers(x)
-        a = jax.nn.tanh(a)
-        # apply output activation function
-        z = (a > 0).astype(np.float32)
+        x = self.layers(x)
         # compute negpmi
-        negpmi = self.negpmi_layers(a)
+        negpmi = self.negpmi_layers(x)
         
         return {
-            "a": a,
-            "z": z,
+            "z": x,
             "neg_pmi": negpmi
         }
     
@@ -231,75 +225,3 @@ class ScaledRBFFLO(ScaledRBF):
         outs = super().__call__(x)
         outs["neg_pmi"] = self.negpmi_layers(outs["z"])
         return outs
-
-
-# class TransformerNCELayer(nn.Module):
-#     """
-#     Attention-like module that uses a form of attention similar to InfoNCE
-#     with custom critic g(q,k) = log(<q, k> + eps) (before simplifying with the exponential)
-#     """
-#     in_features: int
-#     out_features: int
-#     hid_features: int
-#     eps: float = 1e-2
-#     out_activation_fn: Callable = threshold_softgradient
-  
-#     def setup(self):
-
-#         self.q_proj = nn.Dense(features=self.hid_features)
-#         self.k_proj = nn.Dense(features=self.hid_features)
-#         self.v_proj = nn.Dense(features=self.out_features)
-
-#     def score(self, q, k):
-#         # compute score
-#         return (q*k).sum(axis=-1) + self.eps
-    
-#     def compute_weights(self, q, k):
-#         p_ii = self.score(q, k)
-#         k_avg = k.reshape((-1, k.shape[-1])).mean(axis=0)
-#         p_ij = self.score(q, k_avg)
-
-#         weights = p_ii / p_ij
-
-#         return weights
-    
-#     def __call__(self, x_q, x_k):
-#         q = self.q_proj(x_q)
-#         k = self.k_proj(x_k)
-#         v = self.v_proj(x_q)
-
-#         # binarize using a threshold with a sigmoid surrogate gradient
-#         q = self.out_activation_fn(q)
-#         k = self.out_activation_fn(k)
-#         # compute weights
-#         weights = self.compute_weights(q, k)
-#         # compute value output
-#         v = v * weights[..., None]
-#         v = self.out_activation_fn(v)
-
-#         return {"q": q, "k": k, "v": v,}
-    
-
-# class TransformerNCEFLO(TransformerNCELayer):
-#     hid_features_negpmi: Sequence[int]
-#     activation_fn: Callable = jax.nn.mish
-#     out_activation_fn: Callable = nn.sigmoid
-#     use_batchnorm: bool = False
-#     use_dropout: bool = False
-#     dropout_rate: float = 0.0
-#     training: bool = True  # whether in training or eval mode (for dropout/batchnorm)
-
-#     def setup(self):
-#         super().setup()
-
-#         negpmi_layers = []
-#         for f in self.hid_features_negpmi:
-#             negpmi_layers.append(nn.Dense(features=f))
-#             negpmi_layers.append(self.activation_fn)
-#         negpmi_layers.append(nn.Dense(features=1))
-#         self.negpmi_layers = nn.Sequential(negpmi_layers)
-
-#     def __call__(self, x_q, x_k):
-#         outs = super().__call__(x_q, x_k)
-#         outs["neg_pmi"] = self.negpmi_layers(outs["q"])
-#         return outs

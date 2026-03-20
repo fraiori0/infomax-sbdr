@@ -28,15 +28,16 @@ def and_name(alpha: str = ""):
 models = {
     "dense_sigmoid_logand": {
         "1": {"name": r"$\epsilon = 1e-2$", "chkp": 120, "color": "blue", "dash": "solid", "symbol":"circle"},
-        "3": {"name": r"$\epsilon = 1e-1$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
+        # "3": {"name": r"$\epsilon = 1e-1$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
         "4": {"name": r"$\epsilon = 0.3$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
-        "2": {"name": r"$\epsilon = 1e0$", "chkp": 140, "color": "blue", "dash": "solid", "symbol":"circle"},
+        # "2": {"name": r"$\epsilon = 1e0$", "chkp": 140, "color": "blue", "dash": "solid", "symbol":"circle"},
+        "7thresholdsoft": {"name": r"$\epsilon = 0.01$", "chkp": 40, "color": "blue", "dash": "solid", "symbol":"circle"},
     },
     "dense_sigmoid_and": {
         "4": {"name": r"$\alpha = 8.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
-        "3": {"name": r"$\alpha = 4.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
-        "2": {"name": r"$\alpha = 2.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
-        "1": {"name": r"$\alpha = 1.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
+        # "3": {"name": r"$\alpha = 4.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
+        # "2": {"name": r"$\alpha = 2.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
+        # "1": {"name": r"$\alpha = 1.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
     },
 }
 

@@ -3,8 +3,8 @@ import argparse
 
 
 
-default_model = "dense_sigmoid_logand"
-default_number = "7thresholdsoft"
+default_model = "dense_ReLU_logand"
+default_number = "1"
 default_cuda = "1"
 
 # base folder
@@ -401,24 +401,41 @@ def flo_loss(
     outs_2,
 ):
 
-    eps = 1.0e-6
+    eps = model_config["training"]["loss"]["sim_fn"]["eps"]
 
-    # # # Contrastive Mutual Information FLO estimator
-    # # Positive samples
-    p_ii_ctx = sim_fn(outs_1["z"], outs_2["z"])
-    # # Negative samples
-    p_ij_ctx_1 = sim_fn(outs_1["z"][..., :, None, :], outs_2["z"][..., None, :, :])
-    p_ij_ctx_2 = sim_fn(outs_2["z"][..., :, None, :], outs_1["z"][..., None, :, :])
-    # # Neg-pmi term
-    u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
-    u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
-    # compute FLO estimator
-    flo_loss_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx, p_ij_ctx_1, eps=eps)
-    flo_loss_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx, p_ij_ctx_2, eps=eps)
-    flo_loss = (flo_loss_1 + flo_loss_2) / 2
-    flo_loss = flo_loss.mean()
+    z1 = outs_1["z"]
+    a1 = outs_1["a"]
 
-    return flo_loss
+    z2 = outs_2["z"]
+    a2 = outs_2["a"]
+
+    za1 = z1*a1
+    za2 = z2*a2
+
+    p_ii_1 = (za1 * za2).sum(-1) + eps
+    p_ij_1 = (za1[..., :, None, :] * za2[..., None, :, :]).sum(-1) + eps
+    p_ij_1_avg = p_ij_1.mean(-1)
+    flo_val = -np.log(p_ii_1 / p_ij_1_avg)
+    # flo_val = -sbdr.symlog(p_ii_1 / p_ij_1_avg)
+    flo_val = flo_val.mean()
+
+    # # # # Contrastive Mutual Information FLO estimator
+    # # # Positive samples
+    # p_ii_ctx_1 = sim_fn(z1, a2)
+    # p_ii_ctx_2 = sim_fn(z2, a1)
+    # # # Negative samples
+    # p_ij_ctx_1 = sim_fn(z1[..., :, None, :], a2[..., None, :, :])
+    # p_ij_ctx_2 = sim_fn(z2[..., :, None, :], a1[..., None, :, :])
+    # # # Neg-pmi term
+    # u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
+    # u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
+    # # compute FLO estimator
+    # flo_val_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx_1, p_ij_ctx_1, eps=eps)
+    # flo_val_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx_2, p_ij_ctx_2, eps=eps)
+    # flo_val = (flo_val_1 + flo_val_2) / 2
+    # flo_val = flo_val.mean()
+
+    return flo_val
 
 
 flo_loss_jitted = jit(flo_loss)
@@ -537,6 +554,13 @@ def train_step(state, batch):
         # Compute FLO loss
         flo_loss_val = flo_loss(outs_1, outs_2)
         loss_val = flo_loss_val
+
+        # add small positive pressure on pre-activations
+        loss_val = loss_val - 0.001 * 0.5 * (outs_1["a"] + outs_2["a"]).mean()
+
+        # add some pressure to have the same sparsity in the samples
+        # gradient should decrease _a_ for over-active samples, increase it for under-active (binary activation)
+        # samples
 
         # # Compute reconstruction loss
         # rec_loss_val = ((outs["xs_rec"] - batch["x"]) ** 2).mean()
@@ -686,6 +710,7 @@ print(f"\tGradients are ZERO (tolerance):")
 pprint(gradients_are_zero)
 print(f"\tGradients are NAN:")
 pprint(gradients_are_nan)
+
 
 """------------------"""
 """ Logging Utils """

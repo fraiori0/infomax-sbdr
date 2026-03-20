@@ -15,13 +15,20 @@ def sigmoid_ste(x):
     zero = x - jax.lax.stop_gradient(x)
     return zero + jax.nn.sigmoid(jax.lax.stop_gradient(x))
 
-def threshold_softgradient(x, threshold):
+def threshold_softgradient(x, threshold=0.0):
     """ Threshold function with the gradient of a sigmoid"""
-    zero = jax.nn.sigmoid(x) - jax.lax.stop_gradient(jax.nn.sigmoid(x))
-    return zero + (x >= threshold).astype(x.dtype)
+    zero = jax.nn.sigmoid(x-threshold) - jax.lax.stop_gradient(jax.nn.sigmoid(x-threshold))
+    return zero + ((x - threshold) >= 0).astype(x.dtype)
+
+def hard_threshold(x):
+    return (x > 0).astype(x.dtype)
+
+def symlog(x):
+    return np.sign(x) * np.log1p(np.abs(x))
 
 def get_shapes(pytree):
     return jax.tree.map(lambda x: x.shape, pytree)
+
 
 
 def print_pytree_shapes(pytree, prefix=""):
