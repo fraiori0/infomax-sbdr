@@ -1,6 +1,7 @@
 checkpoints/
 activations/
 logs/
+cache/
 
 pretrained/
 
