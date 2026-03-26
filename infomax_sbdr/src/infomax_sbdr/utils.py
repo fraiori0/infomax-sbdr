@@ -69,3 +69,88 @@ def load_model(model_path, verbose=True):
         print(f"Model loaded: {model_path}")
 
     return params, opt_state
+
+
+def make_grid_time_encoder(T_min, T_max, K, N):
+    """
+    Construct a multi-scale binary grid positional encoder.
+
+    Partitions time into K geometric scales, each divided into N bins.
+    The code for time t is the concatenation of K one-hot vectors,
+    one per scale, giving a KN-dimensional binary vector with exactly
+    K active bits.
+
+    Args:
+        T_min (float): Period of the finest scale (same units as input time).
+                       Sets resolution: finest bin width = T_min / N.
+        T_max (float): Period of the coarsest scale.
+                       Sets unambiguous range ≈ T_max.
+        K (int):       Number of scales. Controls total dimension and
+                       Hamming capacity: max distance = 2K.
+        N (int):       Bins per scale. Controls sparsity (p = 1/N)
+                       and resolution jointly with T_min.
+
+    Returns:
+        periods (list[float]): The K period values, for inspection.
+        encode  (callable):    Function t -> code where:
+                                 t:    jax array, arbitrary shape (...), float32
+                                 code: jax array, shape (..., K*N), float32,
+                                       binary with exactly K ones.
+
+    Example:
+        # Encode frame positions within a 10-frame window
+        # at target sparsity p = 1/8, dimension D = 48
+        periods, encode = make_grid_time_encoder(
+            T_min=1.0, T_max=10.0, K=6, N=8
+        )
+        code = encode(np.array([0.0, 3.5, 9.9]))  # shape (3, 48)
+    """
+    # --- Compute periods using standard Python math (not JAX-traced) --------
+    # This runs once at construction time; the result is a fixed constant.
+
+    if K == 1:
+        periods_py = [float(T_min)]
+    else:
+        log_min = np.log(T_min)
+        log_max = np.log(T_max)
+        periods_py = [
+            np.exp(log_min + (log_max - log_min) * k / (K - 1))
+            for k in range(K)
+        ]
+
+    # --- Capture as JAX constants in the closure ----------------------------
+    # Shape (K,) and (N,) — treated as compile-time constants by XLA.
+    periods = np.array(periods_py, dtype=np.float32)   # (K,)
+    bin_ids = np.arange(N, dtype=np.int32)             # (N,)
+
+    # --- Encoder function ---------------------------------------------------
+    def encode(t):
+        """
+        Args:
+            t: jax array of shape (...), arbitrary batch dimensions.
+        Returns:
+            code: jax array of shape (..., K*N), float32, binary.
+                  Exactly K entries are 1.0, the rest are 0.0.
+        """
+        t = np.asarray(t, dtype=np.float32)          # (...)
+
+        # (..., 1) broadcast against (K,) -> (..., K)
+        # Phase within each period, in [0, 1).
+        # np.mod follows Python convention: result has sign of divisor,
+        # so negative times are handled correctly (mod is always >= 0).
+        phases = np.mod(t[..., np.newaxis], periods) / periods    # (..., K)
+
+        # Integer bin index in {0, ..., N-1} at each scale.
+        bin_idx = np.floor(phases * N).astype(np.int32)           # (..., K)
+
+        # One-hot per scale via broadcast comparison:
+        #   bin_idx[..., np.newaxis] : (..., K, 1)
+        #   bin_ids                  : (N,)
+        #   result                   : (..., K, N), dtype bool -> float32
+        code = (bin_idx[..., np.newaxis] == bin_ids).astype(np.float32)
+
+        # Flatten the (K, N) trailing axes into a single (K*N,) axis.
+        # t.shape is always a tuple of Python ints in JAX, safe inside jit.
+        return code.reshape(t.shape + (K * N,))                   # (..., K*N)
+
+    return periods_py, encode
