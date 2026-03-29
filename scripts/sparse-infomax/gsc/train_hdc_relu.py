@@ -5,7 +5,7 @@ import argparse
 
 default_model = "hdc_time_conv"
 default_number = "1"
-default_cuda = "1"
+default_cuda = "0"
 
 # base folder
 base_folder = os.path.join(
@@ -116,14 +116,15 @@ data_folder = os.path.join(
 MAX_SAMPLES: int | None = 500 # None          # ← set to e.g. 500 for quick testing
 CACHE_DIR:   str | None = "./cache"     # ← set to None to skip disk caching
 
-# ── Dataset construction ─────────────────────────────────────────────────────
+transform = sbdr.SpecAugmentTransform(
+    **model_config["dataset"]["transform"]["specaugment"]["kwargs"],
+)
+
 dataset_train = sbdr.GSCDataset(
     root        = data_folder,
     split       = "train",
     precompute  = True,
-    augment     = sbdr.SpecAugmentTransform(
-        max_time_width=8,
-    ),
+    augment     = transform,
     max_samples = MAX_SAMPLES,
     cache_dir   = CACHE_DIR,
 )
@@ -167,42 +168,36 @@ print(f"Batch size    : {BATCH_SIZE}")
 # print(f"Spectrogram   : ({N_MELS} mels × {N_FRAMES} frames)")
 print(f"Cache dir     : {CACHE_DIR}")
 
-exit()
+
+print("\nSample shapes")
+xs, labels = next(iter(dataloader_train))
+print(f"xs: {xs.shape}")
+print(f"labels: {labels.shape}")
+
+
 """---------------------"""
 """ Init Network """
 """---------------------"""
 
 print("\nInitializing model")
 
-model_class = sbdr.config_module_dict[model_config["model"]["type"]]
+model_class = sbdr.config_hdc_module_dict[model_config["model"]["type"]]
 
 model = model_class(
     **model_config["model"]["kwargs"],
-    activation_fn=sbdr.config_activation_dict[model_config["model"]["activation"]],
-    out_activation_fn=sbdr.config_activation_dict[
-        model_config["model"]["out_activation"]
-    ],
-    training=True,
 )
 
 model_eval = model_class(
     **model_config["model"]["kwargs"],
-    activation_fn=sbdr.config_activation_dict[model_config["model"]["activation"]],
-    out_activation_fn=sbdr.config_activation_dict[
-        model_config["model"]["out_activation"]
-    ],
-    training=False,
 )
 
 # # # Initialize parameters
 # Take some data
-(xs_1, xs_2), labels = next(iter(dataloader_train))
-# xs_1 = jax.device_put(xs_1)
-# xs_2 = jax.device_put(xs_2)
+xs, labels = next(iter(dataloader_train))
 # Generate key
 key = jax.random.key(model_config["model"]["seed"])
 # Init params and batch_stats
-variables = model.init(key, xs_1)
+variables = model.init(key, xs)
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
 
@@ -213,7 +208,6 @@ def get_shapes(nested_dict):
 
 
 pprint(get_shapes(variables))
-
 
 """---------------------"""
 """ Forward Pass """
@@ -226,12 +220,6 @@ def forward(variables, xs, key):
     return model.apply(
         variables,
         xs,
-        # DROPOUT
-        # key for dropout
-        rngs={"dropout": key},
-        # # BATCH_NORM
-        # # batch stats should be updated
-        # mutable=["batch_stats"],
     )
 
 
@@ -239,8 +227,6 @@ def forward_eval(variables, xs):
     return model_eval.apply(
         variables,
         xs,
-        # # BATCH_NORM change here
-        # mutable=["batch_stats"],
     )
 
 
@@ -248,7 +234,7 @@ forward_jitted = jit(forward)
 forward_eval_jitted = jit(forward_eval)
 
 # test the forward pass
-(xs_1, xs_2), labels = next(iter(dataloader_train))
+xs, labels = next(iter(dataloader_train))
 # xs_1 = jax.device_put(xs_1)
 # xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
@@ -256,10 +242,10 @@ key = jax.random.key(model_config["model"]["seed"])
 # BATCH_NORM - change here
 # outs, mutable_updates = forward_jitted(variables, xs_1, key)
 # _, _ = forward_eval_jitted(variables, xs_1)
-outs = forward_jitted(variables, xs_1, key)
-_ = forward_eval_jitted(variables, xs_1)
+outs = forward_jitted(variables, xs, key)
+_ = forward_eval_jitted(variables, xs)
 
-print(f"\tInput shape: {xs_1.shape}")
+print(f"\tInput shape: {xs.shape}")
 print(f"\tOutput shapes:")
 pprint(get_shapes(outs))
 
@@ -276,6 +262,7 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
+
 """---------------------"""
 """ Loss Function """
 """---------------------"""
@@ -285,17 +272,12 @@ sim_fn = partial(
     **model_config["training"]["loss"]["sim_fn"]["kwargs"],
 )
 
-
-def l2_weight_loss(w):
-    return (w**2).mean()
-
-
 def flo_loss(
     outs_1,
     outs_2,
 ):
 
-    eps = model_config["training"]["loss"]["sim_fn"]["eps"]
+    eps = model_config["training"]["loss"]["sim_fn"]["kwargs"]["eps"]
 
     z1 = outs_1["z"]
     a1 = outs_1["a"]
@@ -305,29 +287,17 @@ def flo_loss(
 
     za1 = z1*a1
     za2 = z2*a2
+    za1_avg = za1.reshape((-1, za1.shape[-1])).mean(0)
+    za2_avg = za2.reshape((-1, za2.shape[-1])).mean(0)
 
-    p_ii_1 = (za1 * za2).sum(-1) + eps
-    p_ij_1 = (za1[..., :, None, :] * za2[..., None, :, :]).sum(-1) + eps
-    p_ij_1_avg = p_ij_1.mean(-1)
-    flo_val = -np.log(p_ii_1 / p_ij_1_avg)
+    p_ii = (za1 * za2).sum(-1) + eps
+    p_avg_12 = (za1 * za2_avg).sum(-1) + eps
+    p_avg_21 = (za2 * za1_avg).sum(-1) + eps
+
+    flo_1_val = -np.log(p_ii / p_avg_12)
+    flo_2_val = -np.log(p_ii / p_avg_21)
     # flo_val = -sbdr.symlog(p_ii_1 / p_ij_1_avg)
-    flo_val = flo_val.mean()
-
-    # # # # Contrastive Mutual Information FLO estimator
-    # # # Positive samples
-    # p_ii_ctx_1 = sim_fn(z1, a2)
-    # p_ii_ctx_2 = sim_fn(z2, a1)
-    # # # Negative samples
-    # p_ij_ctx_1 = sim_fn(z1[..., :, None, :], a2[..., None, :, :])
-    # p_ij_ctx_2 = sim_fn(z2[..., :, None, :], a1[..., None, :, :])
-    # # # Neg-pmi term
-    # u_ii_ctx_1 = outs_1["neg_pmi"][..., 0]
-    # u_ii_ctx_2 = outs_2["neg_pmi"][..., 0]
-    # # compute FLO estimator
-    # flo_val_1 = -sbdr.flo(u_ii_ctx_1, p_ii_ctx_1, p_ij_ctx_1, eps=eps)
-    # flo_val_2 = -sbdr.flo(u_ii_ctx_2, p_ii_ctx_2, p_ij_ctx_2, eps=eps)
-    # flo_val = (flo_val_1 + flo_val_2) / 2
-    # flo_val = flo_val.mean()
+    flo_val = 0.5 * (flo_1_val.mean() + flo_2_val.mean())
 
     return flo_val
 
@@ -335,7 +305,7 @@ def flo_loss(
 flo_loss_jitted = jit(flo_loss)
 
 # test loss function
-(xs_1, xs_2), labels = next(iter(dataloader_train))
+xs, labels = next(iter(dataloader_train))
 # xs_1 = jax.device_put(xs_1)
 # xs_2 = jax.device_put(xs_2)
 
@@ -345,10 +315,10 @@ key_1, key_2 = jax.random.split(key)
 # BATCH_NORM - change here
 # outs_1, _ = forward(variables, xs_1, key_1)
 # outs_2, _ = forward(variables, xs_2, key_2)
-outs_1 = forward(variables, xs_1, key_1)
-outs_2 = forward(variables, xs_2, key_2)
+outs_1 = forward(variables, xs[:,1:], key_1)
+outs_2 = forward(variables, xs[:,:-1], key_2)
 
-loss = flo_loss_jitted(outs_1, outs_2)
+loss = flo_loss_jitted(outs_1[model_config["training"]["layer_idx"]], outs_2[model_config["training"]["layer_idx"]])
 
 print(f"\tFLO Loss: {loss}")
 
@@ -409,7 +379,7 @@ def train_step(state, batch):
         # Apply the model
         # BATCH_NORM - change here
         # outs_1, mutable_updates_1 = forward(
-        outs_1 = forward(
+        outs = forward(
             {
                 "params": params,
                 # # BATCH_NORM - change here
@@ -421,15 +391,15 @@ def train_step(state, batch):
         # Apply the model to the augmented images
         # BATCH_NORM - change here
         # outs_2, mutable_updates_2 = forward(
-        outs_2 = forward(
-            {
-                "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
-            },
-            batch["x_2"],
-            batch["key_2"],
-        )
+        # outs_2 = forward(
+        #     {
+        #         "params": params,
+        #         # # BATCH_NORM - change here
+        #         # "batch_stats": state["variables"]["batch_stats"],
+        #     },
+        #     batch["x_2"],
+        #     batch["key_2"],
+        # )
         
         # # ADD NOISE - change here
         # key1_p, key1_n = jax.random.split(batch["key_1"])
@@ -444,13 +414,17 @@ def train_step(state, batch):
         # outs_1["z"] = (1-((1-outs_1["z"]) * mask_p_1)) * mask_n_1
         # outs_2["z"] = (1-((1-outs_2["z"]) * mask_p_2)) * mask_n_2
         
+        # select only outputs from the layer that is being trained
+        outs = outs[model_config["training"]["layer_idx"]]
+        outs_1 = jax.tree.map(lambda x : x[:, :-1], outs)
+        outs_2 = jax.tree.map(lambda x : x[:, 1:], outs)
 
         # Compute FLO loss
         flo_loss_val = flo_loss(outs_1, outs_2)
         loss_val = flo_loss_val
 
         # add small positive pressure on pre-activations
-        loss_val = loss_val - 0.001 * 0.5 * (outs_1["a"] + outs_2["a"]).mean()
+        loss_val = loss_val - 0.01 * 0.5 * (outs_1["a"] + outs_2["a"]).mean()
 
         # add some pressure to have the same sparsity in the samples
         # gradient should decrease _a_ for over-active samples, increase it for under-active (binary activation)
@@ -514,7 +488,7 @@ def eval_step(state, batch):
         # Apply the model
         # BATCH_NORM - change here
         # outs_1, mutable_updates_1 = forward_eval(
-        outs_1 = forward_eval(
+        outs = forward_eval(
             {
                 "params": params,
                 # # BATCH_NORM - change here
@@ -522,17 +496,12 @@ def eval_step(state, batch):
             },
             batch["x_1"],
         )
-        # Apply the model to the augmented images
-        # BATCH_NORM - change here
-        # outs_2, mutable_updates_2 = forward_eval(
-        outs_2 = forward_eval(
-            {
-                "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
-            },
-            batch["x_2"],
-        )
+        
+        # select only outputs from the layer that is being trained
+        outs = outs[model_config["training"]["layer_idx"]]
+        outs_1 = jax.tree.map(lambda x : x[:, :-1], outs)
+        outs_2 = jax.tree.map(lambda x : x[:, 1:], outs)
+
         # Compute FLO loss
         flo_loss_val = flo_loss(outs_1, outs_2)
         loss_val = flo_loss_val
@@ -574,16 +543,16 @@ def eval_step(state, batch):
 
 print("\t Test one train step and one eval step")
 
-(xs_1, xs_2), labels = next(iter(dataloader_train))
+xs, labels = next(iter(dataloader_train))
 # xs_1 = jax.device_put(xs_1)
 # xs_2 = jax.device_put(xs_2)
 key = jax.random.key(model_config["model"]["seed"])
 key_1, key_2 = jax.random.split(key)
 batch = {
-    "x_1": xs_1,
+    "x_1": xs,
     "key_1": key_1,
-    "x_2": xs_2,
-    "key_2": key_2,
+    # "x_2": xs_2,
+    # "key_2": key_2,
 }
 
 state, metrics, grads = train_step(state, batch)
@@ -605,7 +574,7 @@ pprint(gradients_are_zero)
 print(f"\tGradients are NAN:")
 pprint(gradients_are_nan)
 
-
+# exit()
 """------------------"""
 """ Logging Utils """
 """------------------"""
@@ -645,11 +614,12 @@ print("\nTraining")
 try:
 
     # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
-    xs_original, labels_original = next(iter(dataloader_original))
+    xs_original, labels_original = next(iter(dataloader_val))
     # BATCH_NORM - change here
     # outs, _ = forward_eval_jitted(state["variables"], xs_original)
     outs = forward_eval_jitted(state["variables"], xs_original)
     # convert to images
+    outs = outs[model_config["training"]["layer_idx"]]
     activation_img = activation_to_img(outs["z"], normalize=False)
     # cs = state["variables"]["params"]["c"]["kernel"].T
     # ss = jax.nn.softplus(state["variables"]["params"]["s"]["kernel"].T)
@@ -747,7 +717,7 @@ try:
             )
 
         # take images from dataloader_original, perform a forward pass, and save to tensorboard as image
-        xs_original, labels_original = next(iter(dataloader_original))
+        xs_original, labels_original = next(iter(dataloader_val))
         # BATCH_NORM - change here
         # outs, _ = forward_eval_jitted(state["variables"], xs_original)
         outs = forward_eval_jitted(state["variables"], xs_original)

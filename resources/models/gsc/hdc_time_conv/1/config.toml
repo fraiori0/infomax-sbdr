@@ -3,30 +3,21 @@ type = "ConvShift"
 seed = 45
 [model.kwargs]
 features = [256, 256]
-conv_size = [3, 3]
-conv_stride = [1, 2]
+conv_sizes = [3, 3]
+conv_strides = [1, 2]
+padding = "SAME"
    
 [dataset]
-[dataset.transform.normalization]
-mean = [0.2860]
-std = [0.3530]
-[dataset.transform.resized_crop]
-size = 28
-scale = [0.9, 1.0]
-ratio = [0.99, 1.01]
-[dataset.transform.flip]
-p = 0.5
-[dataset.transform.grayscale]
-p = 0.1
-[dataset.transform.color_jitter]
-brightness = 0.15
-contrast = 0.15
-saturation = 0.15
-hue = 0.15
+[dataset.transform.specaugment.kwargs]
+n_time_masks = 2
+max_time_width = 5
+n_freq_masks = 2
+max_freq_width = 5
 
 [training]
 epochs = 150
-batch_size = 128
+batch_size = 64
+layer_idx = 0
 
 [training.checkpoint]
 save = true
@@ -54,7 +45,7 @@ weight_decay = 0.00001
 split = 0.16
 eval_interval = 12
 [validation.dataloader]
-batch_size = 256
+batch_size = 128
 [validation.sim_fn]
 type = "log_and"
 quantile = 0.9

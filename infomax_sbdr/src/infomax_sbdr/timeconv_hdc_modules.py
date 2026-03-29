@@ -45,6 +45,7 @@ class ConvShiftLayer(nn.Module):
     features: int
     conv_size: int
     conv_stride: int
+    padding: "SAME"
 
     def setup(self):
         self.layer = nn.Dense(
@@ -71,7 +72,7 @@ class ConvShiftLayer(nn.Module):
             x,
             self.shift_kernel,
             window_strides=(self.conv_stride,),
-            padding="FULL",
+            padding=self.padding,
             dimension_numbers=("NWC", "WIO", "NWC"),
         )
 
@@ -93,6 +94,7 @@ class ConvShift(nn.Module):
     features: Sequence[int]
     conv_sizes: Sequence[Tuple[int]]
     conv_strides: Sequence[Tuple[int, int]]
+    padding: str = "SAME"
 
     def setup(self):
         self.layers = [
@@ -100,6 +102,7 @@ class ConvShift(nn.Module):
                 features=self.features[i],
                 conv_size=self.conv_sizes[i],
                 conv_stride=self.conv_strides[i],
+                padding=self.padding
             )
             for i in range(len(self.features))
         ]
