@@ -45,7 +45,7 @@ class ConvShiftLayer(nn.Module):
     features: int
     conv_size: int
     conv_stride: int
-    padding: "SAME"
+    padding: str = "SAME"
 
     def setup(self):
         self.layer = nn.Dense(
@@ -61,32 +61,31 @@ class ConvShiftLayer(nn.Module):
     def __call__(self, x):
         # assume input x is of shape (*batch_dims, time, features)
         batch_shape = x.shape[:-2]
-        x = x.reshape((-1, *x.shape[-2:]))
 
         # encode
         x = self.layer(x)
 
-        # convolve with shift kernel
-        # note: causal convolution: padding="FULL" and then we cut the output
-        x = jax.lax.conv_general_dilated(
-            x,
+        # compute bounded pre-activation (tanh)
+        a = jax.nn.tanh(x)
+        # and binary activation
+        z = (a > 0).astype(np.float32)
+
+        # Convolve with Shift Kernel, for next layer
+        # This represent a binding operations over vectors in a conv window
+        z = z.reshape((-1, *z.shape[-2:]))
+        z_conv = jax.lax.conv_general_dilated(
+            z.reshape((-1, *z.shape[-2:])),
             self.shift_kernel,
             window_strides=(self.conv_stride,),
             padding=self.padding,
             dimension_numbers=("NWC", "WIO", "NWC"),
         )
-
-        x = x[:, : x.shape[-1] // self.conv_stride, :]
-
-        x = x.reshape((*batch_shape, *x.shape[-2:]))
-
-        a = jax.nn.tanh(x)
-        z = (a > 0).astype(np.float32)
+        z_conv = z_conv.reshape((*batch_shape, *z_conv.shape[-2:]))
 
         return {
-            "x": x,
             "a": a,
-            "z": z
+            "z": z,
+            "z_conv": z_conv,
         }
 
 class ConvShift(nn.Module):
@@ -116,6 +115,6 @@ class ConvShift(nn.Module):
             out = layer(x)
             outs.append(out)
             # set input to next layer
-            x = out["x"]
+            x = jax.lax.stop_gradient(out["z_conv"])
 
         return outs

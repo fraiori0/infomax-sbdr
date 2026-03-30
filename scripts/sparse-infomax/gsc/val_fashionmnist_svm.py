@@ -40,10 +40,10 @@ BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "dense_ReLU_logand" #"vgg_sigmoid_and"  # "vgg_sbdr_5softmax/1"  #
-default_number = "1"  # "1"  #
-default_checkpoint_subfolder = "manual_select" # 
-default_step = 26  # 102
+default_model = "hdc_time_conv"
+default_number = "1" 
+default_checkpoint_subfolder = "manual_select"
+default_step = 84
 
 # base folder
 base_folder = os.path.join(
@@ -86,7 +86,7 @@ model_folder = os.path.join(
     base_folder,
     "resources",
     "models",
-    "fashionmnist",
+    "gsc",
     args.model,
     args.number,
 )
@@ -106,46 +106,36 @@ data_folder = os.path.join(
     base_folder,
     "resources",
     "datasets",
-    "fashion-mnist",
-    "data",
-    "fashion",
+    "gsc",
 )
 
-# create the transform
-transform = tv_transforms.Compose(
-    [
-        # normalize
-        tv_transforms.Normalize(
-            mean=model_config["dataset"]["transform"]["normalization"]["mean"],
-            std=model_config["dataset"]["transform"]["normalization"]["std"],
-        ),
-        # change from  (C, H, W) to (H, W, C)
-        tv_transforms.Lambda(lambda x: x.movedim(-3, -1)),
-    ]
+MAX_SAMPLES: int | None = None # 2050          # ← set to e.g. 500 for quick testing
+CACHE_DIR:   str | None = "./cache"     # ← set to None to skip disk caching
+
+dataset_train = sbdr.GSCDataset(
+    root        = data_folder,
+    split       = "train",
+    precompute  = True,
+    augment     = None,
+    max_samples = MAX_SAMPLES,
+    cache_dir   = CACHE_DIR,
 )
 
-dataset = sbdr.FashionMNISTDataset(
-    folder_path=data_folder,
-    kind="train",
-    transform=transform,
-    flatten=True
+dataset_val = sbdr.GSCDataset(
+    root        = data_folder,
+    split       = "val",
+    precompute  = True,
+    augment     = None,
+    max_samples = MAX_SAMPLES,
+    cache_dir   = CACHE_DIR,
 )
-
-dataset_train, dataset_val = torch.utils.data.random_split(
-    dataset,
-    [
-        1 - model_config["validation"]["split"],
-        model_config["validation"]["split"],
-    ],
-    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
-)
-
 
 dataloader_train = sbdr.NumpyLoader(
     dataset_train,
     batch_size=model_config["training"]["batch_size"],
     shuffle=False,
     drop_last=False,
+    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
 )
 
 dataloader_val = sbdr.NumpyLoader(
@@ -153,67 +143,32 @@ dataloader_val = sbdr.NumpyLoader(
     batch_size=model_config["validation"]["dataloader"]["batch_size"],
     shuffle=False,
     drop_last=False,
+    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
 )
 
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+print(f"Train samples : {len(dataset_train):>7,}   batches: {len(dataloader_train):,}")
+print(f"Val   samples : {len(dataset_val):>7,}   batches: {len(dataloader_val):,}")
+# print(f"Spectrogram   : ({N_MELS} mels × {N_FRAMES} frames)")
+print(f"Cache dir     : {CACHE_DIR}")
+
+
+print("\nSample shapes")
 xs, labels = next(iter(dataloader_train))
+print(f"xs: {xs.shape}")
+print(f"labels: {labels.shape}")
 
-print(f"\tInput xs: {xs.shape} (dtype: {xs.dtype})")
-print(f"\tLabels: {labels.shape} (dtype: {labels.dtype})")
-
-
-"""---------------------"""
-""" Visualize the images"""
-"""---------------------"""
-
-
-# def untransform(x):
-#     return (x * np.array([0.2470, 0.2435, 0.2616])) + np.array([0.4914, 0.4822, 0.4465])
-
-
-# # visualize the images
-# # converted to BGR
-# for i, (img_1, img_2) in enumerate(zip(xs_1, xs_2)):
-#     img_1 = untransform(img_1)
-#     img_2 = untransform(img_2)
-#     # clip in range 0-1
-#     img_1 = np.clip(img_1, 0, 1)
-#     img_2 = np.clip(img_2, 0, 1)
-#     # resize
-#     img_1 = jax.image.resize(img_1, (128, 128, 3), "bilinear")
-#     img_2 = jax.image.resize(img_2, (128, 128, 3), "bilinear")
-#     # convert to BGR
-#     img_1 = np.flip(img_1, axis=-1)
-#     img_2 = np.flip(img_2, axis=-1)
-#     # convert to 0-255
-#     img_1 = (img_1 * 255).astype(np.uint8)
-#     img_2 = (img_2 * 255).astype(np.uint8)
-#     # convert to original NumPy array
-#     img_1 = onp.array(img_1)
-#     img_2 = onp.array(img_2)
-#     # show image
-#     cv2.imshow("Image 1", img_1)
-#     cv2.imshow("Image 2", img_2)
-#     k = cv2.waitKey(0)
-#     if k == ord("q"):
-#         break
-# cv2.destroyAllWindows()
-
-# exit()
 """---------------------"""
 """ Init Model """
 """---------------------"""
 
 print("\nInitializing model")
 
-model_class = sbdr.config_module_dict[model_config["model"]["type"]]
+model_class = sbdr.config_hdc_module_dict[model_config["model"]["type"]]
 
 model_eval = model_class(
     **model_config["model"]["kwargs"],
-    activation_fn=sbdr.config_activation_dict[model_config["model"]["activation"]],
-    out_activation_fn=sbdr.config_activation_dict[
-        model_config["model"]["out_activation"]
-    ],
-    training=False,
 )
 
 # # # Initialize parameters
@@ -279,8 +234,6 @@ def forward_eval(variables, xs):
     return model_eval.apply(
         variables,
         xs,
-        # BATCH_NORM
-        mutable=["batch_stats"],
     )
 
 
@@ -304,6 +257,19 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
+
+"""---------------------"""
+""" Utils """
+"""---------------------"""
+
+def extract_features(outs):
+    z = []
+    for l_idx in range(len(outs)):
+        # time average
+        z.append(outs[l_idx]["z_conv"].mean(axis=-2))
+
+    return np.concatenate(z, axis=-1)
+
 """---------------------"""
 """ Forward pass on training set """
 """---------------------"""
@@ -318,42 +284,21 @@ label_count = np.zeros(labels.shape[-1])
 
 # record output and labels
 zs = []
-labels_onehot = []
+labels_categorical = []
 
 for xs, labels in tqdm(dataloader_train):
     # encode using a forward pass
-    outs, _ = forward_eval_jitted(variables, xs)
+    outs = forward_eval_jitted(variables, xs)
 
-    zs.append(outs["z"])
-    labels_onehot.append(labels)
+    zs.append(extract_features(outs))
+    labels_categorical.append(labels)
 
-    label_masks = (labels > 0.5).T
-
-    for i, l in enumerate(label_masks):
-        # print(l)
-        sem_labels = sem_labels.at[i].set(sem_labels[i] + outs["z"][l].sum(axis=0))
-        label_count = label_count.at[i].set(label_count[i] + l.sum())
-
-    # break
 
 zs = np.concatenate(zs, axis=0)
-labels_onehot = np.concatenate(labels_onehot, axis=0)
-labels_categorical = labels_onehot.argmax(axis=-1)
+labels_categorical = np.concatenate(labels_categorical, axis=0)
 
 print(f"\tEncoding shape (zs): {zs.shape}")
-print(f"\tLabels shape (one-hot): {labels_onehot.shape}")
 print(f"\tLabels shape (categorical): {labels_categorical.shape}")
-
-sem_labels = sem_labels / label_count[:, None]
-
-# print(sem_labels[0])
-# print(sem_labels[:, :10])
-print(f"\nSemantic Labels")
-print(f"\tPer-label count: {label_count}")
-print(f"\tAverage per-label activity: {sem_labels.mean(axis=-1)}")
-print(f"\tSemantic labels shape: {sem_labels.shape}")
-
-print(f"\nAverage activity: {outs['z'].mean()}")
 
 """---------------------"""
 """ Forward pass on validation set """
@@ -362,23 +307,19 @@ print(f"\nAverage activity: {outs['z'].mean()}")
 print("\nForward pass on the whole validation set")
 
 zs_val = []
-labels_onehot_val = []
+labels_categorical_val = []
 
 for xs, labels in tqdm(dataloader_val):
     # encode using a forward pass
-    outs, _ = forward_eval_jitted(variables, xs)
+    outs = forward_eval_jitted(variables, xs)
 
-    zs_val.append(outs["z"])
-    labels_onehot_val.append(labels)
+    zs_val.append(extract_features(outs))
+    labels_categorical_val.append(labels)
 
 zs_val = np.concatenate(zs_val, axis=0)
-labels_onehot_val = np.concatenate(labels_onehot_val, axis=0)
-
-
-labels_categorical_val = labels_onehot_val.argmax(axis=-1)
+labels_categorical_val = np.concatenate(labels_categorical_val, axis=0)
 
 print(f"\tEncoding shape (zs_val): {zs_val.shape}")
-print(f"\tLabels shape (one-hot): {labels_onehot_val.shape}")
 print(f"\tLabels shape (categorical): {labels_categorical_val.shape}")
 
 """---------------------"""
@@ -446,9 +387,9 @@ os.makedirs(save_folder, exist_ok=True)
 onp.savez_compressed(
     os.path.join(save_folder, f"activations_chkp_{default_step:03d}.npz"),
     zs=onp.array(zs),
-    labels_onehot=onp.array(labels_onehot),
+    labels_categorical=onp.array(labels_categorical),
     zs_val=onp.array(zs_val),
-    labels_onehot_val=onp.array(labels_onehot_val),
+    labels_categorical_val=onp.array(labels_categorical_val),
 )
 
 # exit()
@@ -479,89 +420,89 @@ if BINARIZE:
 """ K-Nearest Neighbors Classification """
 """---------------------"""
 
-print("\nK-Nearest Neighbors Classification")
+# print("\nK-Nearest Neighbors Classification")
 
-# # # Compute "distances" using the similarity metrics
-sim_fn = jit(partial(
-    sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
-    **model_config["validation"]["sim_fn"]["kwargs"],
-))
+# # # # Compute "distances" using the similarity metrics
+# sim_fn = jit(partial(
+#     sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
+#     **model_config["validation"]["sim_fn"]["kwargs"],
+# ))
 
-ds_val = -sim_fn(zs_val[:, None], zs[None, :])
+# ds_val = -sim_fn(zs_val[:, None], zs[None, :])
 
-print(f"\tDistances shape: {ds_val.shape}")
+# print(f"\tDistances shape: {ds_val.shape}")
 
-# For each example in the validation set, find the k nearest neighbors in the training set
-k = 19
-# Use jax.lax.top_k to find the index of the k nearest neighbors
-nearest_indices = jax.lax.top_k(-ds_val, k=k)[1]
-# np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
-print(f"\tNearest indices shape: {nearest_indices.shape}")
-# Select the labels of the k nearest neighbors
-nearest_labels = labels_onehot[nearest_indices]
-print(f"\tNearest labels shape: {nearest_labels.shape}")
+# # For each example in the validation set, find the k nearest neighbors in the training set
+# k = 19
+# # Use jax.lax.top_k to find the index of the k nearest neighbors
+# nearest_indices = jax.lax.top_k(-ds_val, k=k)[1]
+# # np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
+# print(f"\tNearest indices shape: {nearest_indices.shape}")
+# # Select the labels of the k nearest neighbors
+# nearest_labels = labels_onehot[nearest_indices]
+# print(f"\tNearest labels shape: {nearest_labels.shape}")
 
-# Check how many of the k nearest neighbors have the same label as the validation example
-correct_mask = (labels_onehot_val[:, None] * nearest_labels).sum(axis=-1)  # shape: (n_val, k)
-print(f"\tCorrect mask shape: {correct_mask.shape}")
+# # Check how many of the k nearest neighbors have the same label as the validation example
+# correct_mask = (labels_onehot_val[:, None] * nearest_labels).sum(axis=-1)  # shape: (n_val, k)
+# print(f"\tCorrect mask shape: {correct_mask.shape}")
 
-# Compute the accuracy as the fraction of correct neighbors
-acc_knn = correct_mask.mean()
+# # Compute the accuracy as the fraction of correct neighbors
+# acc_knn = correct_mask.mean()
 
-correct_avg = correct_mask.mean(axis=-1)
+# correct_avg = correct_mask.mean(axis=-1)
 
-print(f"\tKNN accuracy: {acc_knn}")
-print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std()}")
+# print(f"\tKNN accuracy: {acc_knn}")
+# print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std()}")
 
-# Compute accuracy according to neighbor vote (with equal weights)
-average_label = (nearest_labels.mean(axis=-2))
-print(f"\tAverage label shape: {average_label.shape}")
-# print(average_label[:5])
-# Convert to categorical labels
-labels_categorical_knn_val = average_label.argmax(axis=-1)
-# Compute accuracy
-acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
+# # Compute accuracy according to neighbor vote (with equal weights)
+# average_label = (nearest_labels.mean(axis=-2))
+# print(f"\tAverage label shape: {average_label.shape}")
+# # print(average_label[:5])
+# # Convert to categorical labels
+# labels_categorical_knn_val = average_label.argmax(axis=-1)
+# # Compute accuracy
+# acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
 
-print(f"\tKNN accuracy (vote)")
-print(f"\t\tK={k} : {acc_knn_vote:.4f}")
+# print(f"\tKNN accuracy (vote)")
+# print(f"\t\tK={k} : {acc_knn_vote:.4f}")
 
 """---------------------"""
 """ Linear Support Vector Classification """
 """---------------------"""
 
-print("\nLinear Support Vector Classification")
+# print("\nLinear Support Vector Classification")
 
 
 
-print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
-print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
+# print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
+# print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
 
 
-svm_model = LinearSVC(
-    random_state=0,
-    tol=1e-4,
-    multi_class="ovr",
-    intercept_scaling=1,
-    C=5,
-    penalty="l1",
-    loss="squared_hinge",
-)
+# svm_model = LinearSVC(
+#     random_state=0,
+#     tol=1e-4,
+#     multi_class="ovr",
+#     intercept_scaling=1,
+#     C=5,
+#     penalty="l1",
+#     loss="squared_hinge",
+# )
 
-print("\nTraining Linear SVM on the training set")
-t0 = time()
+# print("\nTraining Linear SVM on the training set")
+# t0 = time()
 
-svm_model.fit(
-    zs,
-    labels_categorical,
-)
-acc_train = svm_model.score(zs, labels_categorical)
-acc_val = svm_model.score(zs_val, labels_categorical_val)
+# svm_model.fit(
+#     zs,
+#     labels_categorical,
+# )
+# acc_train = svm_model.score(zs, labels_categorical)
+# acc_val = svm_model.score(zs_val, labels_categorical_val)
 
-print(f"\t  Time: {time() - t0:.2f} seconds")
+# print(f"\t  Time: {time() - t0:.2f} seconds")
 
-print(f"\tAccuracy on training set: {acc_train}")
+# print(f"\tAccuracy on training set: {acc_train}")
 
-print(f"\tAccuracy on validation set: {acc_val}")
+# print(f"\tAccuracy on validation set: {acc_val}")
 
 
 # fit also a linear logistic regression for comparison
@@ -574,6 +515,7 @@ logreg_model = LogisticRegression(
     C=1,
     penalty="l1",
     solver="saga",
+    verbose=1,
 )
 
 print("\nTraining Linear Logistic Regression on the training set")

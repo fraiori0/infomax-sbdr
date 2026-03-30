@@ -14,7 +14,7 @@ import infomax_sbdr.antihebbian_band_modules as band_ah
 import infomax_sbdr.neural_gas as neural_gas
 import infomax_sbdr.spike_eligibility_modules as se_modules  
 import infomax_sbdr.utils as ut
-import infomax_sbdr.timeconv_hdc_modules as tconv
+import infomax_sbdr.recurrent_relu_modules as rpl
 
 
 """
@@ -81,8 +81,8 @@ config_ah_module_dict = {
     "SpikeEligibilityModule": se_modules.SpikeEligibilityModule,
 }
 
-config_hdc_module_dict = {
-    "ConvShift" : tconv.ConvShift,
+config_rpl_module_dict = {
+    "RecRelu" : rpl.RecRelu,
 }
 
 config_centroid_modules_dict = {

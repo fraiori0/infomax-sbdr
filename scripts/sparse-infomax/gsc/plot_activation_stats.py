@@ -26,18 +26,8 @@ def and_name(alpha: str = ""):
     return r"$\text{MI} \left( \langle y_1, y_2 \rangle \right) + \alpha L_1(y_1)$ " + alpha
 
 models = {
-    "dense_sigmoid_logand": {
-        "1": {"name": r"$\epsilon = 1e-2$", "chkp": 120, "color": "blue", "dash": "solid", "symbol":"circle"},
-        # "3": {"name": r"$\epsilon = 1e-1$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
-        "4": {"name": r"$\epsilon = 0.3$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
-        # "2": {"name": r"$\epsilon = 1e0$", "chkp": 140, "color": "blue", "dash": "solid", "symbol":"circle"},
-        "7thresholdsoft": {"name": r"$\epsilon = 0.01$", "chkp": 40, "color": "blue", "dash": "solid", "symbol":"circle"},
-    },
-    "dense_sigmoid_and": {
-        "4": {"name": r"$\alpha = 8.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
-        # "3": {"name": r"$\alpha = 4.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
-        # "2": {"name": r"$\alpha = 2.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
-        # "1": {"name": r"$\alpha = 1.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
+    "hdc_tim_conv": {
+        "1": {"name": r"$\epsilon = 1e-2$", "chkp": 116, "color": "blue", "dash": "solid", "symbol":"circle"},
     },
 }
 
@@ -57,7 +47,7 @@ save_folder = os.path.join(
     base_folder,
     "resources",
     "results",
-    "fashionmnist",
+    "gsc",
 )
 if not os.path.exists(save_folder):
     os.makedirs(save_folder)
@@ -72,8 +62,8 @@ fig_layout_single = {
 }
 
 k_types_and_subtitles = (
-    ("dense_sigmoid_logand", "dense_sigmoid_and"),
-    (logand_name(), and_name()),
+    ("hdc_time_conv",), # "dense_sigmoid_and"),
+    (logand_name(),), # and_name()),
 )
 
 # path to the file with stored result for accuracy, computing them evrytime takes a lot of time

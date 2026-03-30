@@ -1,23 +1,21 @@
 [model]
-type = "ConvShift"
+type = "RecRelu"
 seed = 45
 [model.kwargs]
 features = [256, 256]
-conv_sizes = [3, 3]
-conv_strides = [1, 2]
-padding = "SAME"
    
 [dataset]
 [dataset.transform.specaugment.kwargs]
 n_time_masks = 2
-max_time_width = 5
+max_time_width = 10 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
 n_freq_masks = 2
-max_freq_width = 5
+max_freq_width = 2
 
 [training]
 epochs = 150
 batch_size = 64
-layer_idx = 0
+layer_idx = 0 # we train a single layer at a time, they are independent
+exc_weight = 0.01 # weight for regularization pushing to increased pre-activation
 
 [training.checkpoint]
 save = true
