@@ -43,7 +43,7 @@ class RecReluLayer(nn.Module):
         z_rec = (a_rec > 0).astype(np.float32)
 
         # # Prediction head
-        a_pred = jax.nn.tanh(self.pred_layer(a_rec))
+        a_pred = jax.nn.tanh(self.pred_layer(a_rec * z_rec))
         # binary activation
         z_pred = (a_pred > 0).astype(np.float32)
 

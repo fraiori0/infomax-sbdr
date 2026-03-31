@@ -302,27 +302,31 @@ def flo_loss(
     za_rec_avg = za_rec.reshape((-1, za_rec.shape[-1])).mean(0)
     za_pred_avg = za_pred.reshape((-1, za_pred.shape[-1])).mean(0)
 
-    # # # Forward and prediction infoNCE
-    # Positive sample is shifted in time
-    p_ii_pred_fwd = (za_pred[..., :-1, :] * za_fwd[..., 1:, :]).sum(-1) + eps
-    p_avg_pred_fwd = (za_pred[..., :-1, :] * za_fwd_avg).sum(-1) + eps
-    p_avg_fwd_pred = (za_fwd[..., 1:, :] * za_pred_avg).sum(-1) + eps
+    # # # Encoder InfoNCE
+    # separate everything
+    p_ii_fwd = (za_fwd * za_fwd).sum(-1) + eps
+    p_avg_fwd = (za_fwd * za_fwd_avg).sum(-1) + eps
+    flo_fwd_val = -np.log(p_ii_fwd / p_avg_fwd)
+    flo_fwd_val = flo_fwd_val.mean()
 
-    flo_pred_fwd_val = -np.log(p_ii_pred_fwd / p_avg_pred_fwd)
-    flo_fwd_pred_val = -np.log(p_ii_pred_fwd / p_avg_fwd_pred)
-    flo_pred_val = 0.5 * (flo_pred_fwd_val.mean() + flo_fwd_pred_val.mean())
+    # # # Prediction infoNCE
+    # Stop the gradient on target (classic JEPA trick)
+    p_ii_pred = (za_pred[..., :-2, :] * jax.lax.stop_gradient(za_fwd[..., 2:, :])).sum(-1) + eps
+    p_avg_pred = (za_pred[..., :-2, :] * jax.lax.stop_gradient(za_fwd_avg)).sum(-1) + eps
+    flo_pred_val = -np.log(p_ii_pred / p_avg_pred)
+    flo_pred_val = flo_pred_val.mean()
 
     # # # Recurrent InfoNCE (separate all latent states)
     p_ii_rec = (za_rec * za_rec).sum(-1) + eps
     p_avg_rec = (za_rec * za_rec_avg).sum(-1) + eps
-
     flo_rec_val = -np.log(p_ii_rec / p_avg_rec)
     flo_rec_val = flo_rec_val.mean()
 
     # Compute vumulative loss
-    flo_val = flo_pred_val + flo_rec_val
+    flo_val = flo_fwd_val + 3 * flo_pred_val + flo_rec_val
 
     aux = {
+        "flo_fwd": flo_fwd_val,
         "flo_pred": flo_pred_val,
         "flo_rec": flo_rec_val,
     }
@@ -426,6 +430,8 @@ def compute_metrics(outs):
             )
 
     return metrics
+
+
 
 """---------------------"""
 """ Training and Evaluation Steps """
@@ -592,30 +598,37 @@ pprint(gradients_are_nan)
 """------------------"""
 """ Logging Utils """
 """------------------"""
+@jit
+def compute_activation_imgs(outs):
+    """Compute metrics from model outputs."""
+    img_dict = {}
 
+    N_MAX = 8
 
-def activation_to_img(z, normalize=True):
-    
-    # # Compute Width and Height to get an approximate square shape, padding if necessary
-    # n_height = np.sqrt(z.shape[-1]).astype(int)
-    # n_width = z.shape[-1] // n_height + int(not (z.shape[-1] % n_height) == 0)
-    # # normalize min-max in [0, 1]
-    # if normalize:
-    #     z = (z - z.min()) / (z.max() - z.min())
-    # # pad z with zero if necessary, so we can then reshape the feature dimension (last)
-    # # to the given width and height
-    # pad_width = [(0, 0)] * (len(z.shape) - 1)
-    # pad_width.append((0, n_height * n_width - z.shape[-1]))
-    # z = np.pad(z, pad_width, mode="constant", constant_values=0.0)
-    # # add a dummy final channel dimension, like it's grayscale
-    # z = z.reshape((*z.shape[:-1], n_height, n_width, 1))
+    for l_idx, l_out in enumerate(outs):
+        # # binary activations
+        for k_z, k_a in zip(["z_fwd", "z_rec","z_pred"], ["a_fwd", "a_rec","a_pred"]):
+            
+            # select only a few outputs (e.g., 8) from the batch size
+            _z = l_out[k_z][:N_MAX]
+            _a = l_out[k_a][:N_MAX]
 
-    # just keep as is, as an alternative, adding the final channel dimension
-    z = z.reshape((*z.shape, 1))
+            # z is already in 0-1, a needs to be 
+            # minmaxed from [-1, 1] back to [0, 1]
+            _a = (_a + 1) / 2
 
+            # add last channel (grayscale)
+            _z = _z.reshape((*_z.shape, 1))
+            _a = _a.reshape((*_a.shape, 1))
 
-    return onp.array(z)
+            img_dict.update(
+                {f"activation_{l_idx}_{k_z}/{img_i}": img for img_i, img in enumerate(_z)}
+            )
+            img_dict.update(
+                {f"activation_{l_idx}_{k_a}/{img_i}": img for img_i, img in enumerate(_a)}
+            )
 
+    return img_dict
 
 """------------------"""
 """ Training """
@@ -637,16 +650,12 @@ try:
     xs_original, labels_original = next(iter(dataloader_val))
     # BATCH_NORM - change here
     # outs, _ = forward_eval_jitted(state["variables"], xs_original)
-    outs = forward_eval_jitted(state["variables"], xs_original)
-    for l_idx, l_out in enumerate(outs):
-        activation_img = activation_to_img(l_out["z"])
-        for i in range(min(16, activation_img.shape[0])):
-            writer.add_image(
-                f"activation_img_{l_idx}/{i+1}",
-                activation_img[i],
-                global_step=0,
-                dataformats="HWC",
-            )
+    outs = forward_eval_jitted(state["variables"], xs_original, key)
+    # convert to images
+    img_dict = compute_activation_imgs(outs)
+    for k, v in img_dict.items():
+        v = onp.array(v) # important, tensorboard wants lists or numpy arrays, not jax.numpt arrays
+        writer.add_image(k, v, global_step=0, dataformats="HWC")
 
     for epoch in tqdm(range(model_config["training"]["epochs"])):
 
@@ -679,8 +688,10 @@ try:
             # test on validation set
             if batch_idx % model_config["validation"]["eval_interval"] == 0:
                 xs, labels_val = next(iter(dataloader_val))
+                key, _ = jax.random.split(key, 2)
                 batch_val = {
                     "x_1": xs,
+                    "key_1": key,
                     # "x_2": xs_2_val,
                 }
                 metrics_val = eval_step(state, batch_val)
@@ -721,16 +732,13 @@ try:
         xs_original, labels_original = next(iter(dataloader_val))
         # BATCH_NORM - change here
         # outs, _ = forward_eval_jitted(state["variables"], xs_original)
-        outs = forward_eval_jitted(state["variables"], xs_original)
-        for l_idx, l_out in enumerate(outs):
-            activation_img = activation_to_img(l_out["z"])
-            for i in range(min(16, activation_img.shape[0])):
-                writer.add_image(
-                    f"activation_img_{l_idx}/{i+1}",
-                    activation_img[i],
-                    global_step=epoch_step,
-                    dataformats="HWC",
-                )
+        key, _ = jax.random.split(key, 2)
+        outs = forward_eval_jitted(state["variables"], xs_original, key)
+        # convert to images
+        img_dict = compute_activation_imgs(outs)
+        for k, v in img_dict.items():
+            v = onp.array(v) # important, tensorboard wants lists or numpy arrays, not jax.numpt arrays
+            writer.add_image(k, v, global_step=epoch_step, dataformats="HWC")
 
 except KeyboardInterrupt:
     print("\nTraining interrupted")
