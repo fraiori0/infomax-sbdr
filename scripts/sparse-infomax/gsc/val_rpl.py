@@ -40,10 +40,10 @@ BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "hdc_time_conv"
+default_model = "rpl"
 default_number = "1" 
 default_checkpoint_subfolder = "manual_select"
-default_step = 84
+default_step = 194
 
 # base folder
 base_folder = os.path.join(
@@ -165,7 +165,7 @@ print(f"labels: {labels.shape}")
 
 print("\nInitializing model")
 
-model_class = sbdr.config_hdc_module_dict[model_config["model"]["type"]]
+model_class = sbdr.config_rpl_module_dict[model_config["model"]["type"]]
 
 model_eval = model_class(
     **model_config["model"]["kwargs"],
@@ -173,11 +173,16 @@ model_eval = model_class(
 
 # # # Initialize parameters
 # Take some data
-xs, labels = next(iter(dataloader_train))
+x_seq, labels = next(iter(dataloader_train))
 # Generate key
 key = jax.random.key(model_config["model"]["seed"])
-# Init params and batch_stats
-variables = model_eval.init(key, xs)
+print(key)
+print(key.shape)
+# Init recurrent state
+s0 = model_eval.init_state_from_input(key, x_seq[..., 0, :])
+pprint(sbdr.get_shapes(s0))
+# Init params
+variables = model_eval.init(key, x_seq[..., 0, :], s0)
 
 # # # Initialize the optimizer as well, to properly restore the full checkpoint
 optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
@@ -230,11 +235,17 @@ pprint(get_shapes(variables))
 print("\nForward pass jitted")
 
 
-def forward_eval(variables, xs):
-    return model_eval.apply(
+def forward_eval(variables, xs, key):
+    # init state
+    s0 = model_eval.init_state_from_input(key, xs[..., 0, :])
+    # scan over the sequence
+    out = model_eval.apply(
         variables,
         xs,
+        s0,
+        method=model_eval.scan,
     )
+    return out
 
 
 forward_eval_jitted = jit(forward_eval)
@@ -243,7 +254,7 @@ forward_eval_jitted = jit(forward_eval)
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
 
-outs, _ = forward_eval_jitted(variables, xs)
+outs = forward_eval_jitted(variables, xs, key)
 
 print(f"\tInput shape: {xs.shape}")
 print(f"\tOutput shapes:")
@@ -257,7 +268,7 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
-
+exit()
 """---------------------"""
 """ Utils """
 """---------------------"""

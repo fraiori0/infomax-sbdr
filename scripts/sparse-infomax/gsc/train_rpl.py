@@ -199,7 +199,7 @@ print(key.shape)
 s0 = model.init_state_from_input(key, x_seq[..., 0, :])
 pprint(get_shapes(s0))
 
-# Init params and batch_stats
+# Init params
 variables = model.init(key, x_seq[..., 0, :], s0)
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
@@ -229,13 +229,13 @@ def forward(variables, xs, key):
 
 def forward_eval(variables, xs, key):
     # init state
-    s0 = model.init_state_from_input(key, xs[..., 0, :])
+    s0 = model_eval.init_state_from_input(key, xs[..., 0, :])
     # scan over the sequence
-    out = model.apply(
+    out = model_eval.apply(
         variables,
         xs,
         s0,
-        method=model.scan,
+        method=model_eval.scan,
     )
     return out
 
