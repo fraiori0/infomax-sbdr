@@ -1,8 +1,8 @@
 [model]
-type = "RecRelu"
+type = "RecSTE"
 seed = 45
 [model.kwargs]
-features = [128, 128]
+features = [128,128]
    
 [dataset]
 [dataset.transform.specaugment.kwargs]
@@ -14,8 +14,8 @@ max_freq_width = 2
 [training]
 epochs = 150
 batch_size = 256
-layer_idx = 1 # we train a single layer at a time, they are independent
-pred_horizon = 4 # how many steps head we train to predict (only the selected layer)
+layer_idx = 0 # we train a single layer at a time, they are independent
+pred_horizon = 2 # how many steps ahead we train to predict (check also layer_idx, this will be applied to that layer)
 exc_weight = 0.001 # weight for regularization pushing to increased pre-activation
 
 [training.checkpoint]
@@ -32,13 +32,13 @@ drop_last = true
 [training.loss.sim_fn]
 type = "log_and"
 [training.loss.sim_fn.kwargs]
-eps = 1.0e-1
+eps = 1.0e-2
 
 [training.optimizer]
 type = "adamw"
 [training.optimizer.kwargs]
-learning_rate = 0.01
-weight_decay = 0.0001
+learning_rate = 0.003
+weight_decay = 0.00001
 
 [validation]
 split = 0.16

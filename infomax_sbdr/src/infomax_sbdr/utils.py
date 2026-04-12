@@ -23,6 +23,11 @@ def threshold_softgradient(x, threshold=0.0):
 def hard_threshold(x):
     return (x > 0).astype(x.dtype)
 
+def threshold_ste(x):
+    """ Threshold function with straight-through gradient """
+    zero = x - jax.lax.stop_gradient(x)
+    return zero + jax.lax.stop_gradient((x > 0).astype(x.dtype))
+
 def symlog(x):
     return np.sign(x) * np.log1p(np.abs(x))
 

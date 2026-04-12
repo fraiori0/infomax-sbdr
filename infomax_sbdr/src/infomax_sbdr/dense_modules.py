@@ -5,6 +5,7 @@ import flax.linen as nn
 from typing import Sequence, Callable
 from functools import partial
 from infomax_sbdr.utils import threshold_softgradient
+import infomax_sbdr.initializers as my_inits
 
 
 class DenseFLO(nn.Module):
@@ -232,6 +233,50 @@ class ScaledRBFFLO(ScaledRBF):
         outs["neg_pmi"] = self.negpmi_layers(outs["z"])
         return outs
 
+
+class DenseNCEWeights(nn.Module):
+    """
+    Single-layer MLP that is supposed to be train by using
+    an InfoNCE loss that directly involves the weights.
+    Note, weights and inputs should be non-negative to avoid degeneracies
+    """
+
+    out_features: int
+    in_features: int
+
+    def setup(self):
+
+        # make W and b params. Note, W should be non-negative
+        self.w = self.param(
+            "w",
+            # should be initialized with all non-negative weights
+            # using the proper initializers
+            init_fn=my_inits.non_negative(scale=0.1),
+            shape=(self.in_features, self.out_features),
+            dtype=np.float32,
+        )
+
+        self.b = self.param(
+            "b",
+            nn.initializers.constant(0.0),
+            (self.out_features,),
+            np.float32
+        )
+
+    def __call__(self, x):
+        # input x of shape (*batch_dims, features)
+        # i.e., already flattened on the feature dimensions,
+        # if there were multiple in the original data (like image C, H, W)
+
+        # apply the feedforward weights
+        a = x @ self.w 
+        # no gradient on the weights, they will appear directly in the loss
+        z = jax.nn.sigmoid(jax.lax.stop_gradient(a) + self.b)
+        
+        return {
+            "a": a,
+            "z": z,
+        }
 
 # class TransformerNCELayer(nn.Module):
 #     """

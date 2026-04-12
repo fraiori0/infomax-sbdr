@@ -598,19 +598,23 @@ class GSCDataset(Dataset):
         """
         Returns
         -------
-        spec  : float32 Tensor, shape (n_mels, n_frames)
+        spec  : float32 Tensor, shape (n_frames, n_mels) < CHANGED HERE to have time axis second-to-last
                 CMVN-normalised log-mel spectrogram.
                 SpecAugment is applied if ``self.augment`` is set.
         label : int in [0, num_classes)
         """
         if self._cache is not None:
-            spec = self._cache[idx].clone()         # (n_mels, n_frames)
+            spec = self._cache[idx].clone() # (n_mels, n_frames), we will switch later the two axis
         else:
             wav  = load_and_pad_waveform(self._paths[idx])
             spec = self._preprocess(wav)
 
         if self.augment is not None:
             spec = self.augment(spec)
+
+        # Swap axes to be (..., n_frames, n_mels)
+        # After transforming, everything else is written to assume (..., n_mels, n_frames)
+        spec = spec.transpose(-1, -2)
 
         return spec, self._labels[idx]
 

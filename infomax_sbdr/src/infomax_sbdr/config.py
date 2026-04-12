@@ -70,6 +70,7 @@ config_module_dict = {
     "VGGFLOMultiLayerNEGPMI": VGGFLOMultiLayerNEGPMI,
     "VGGDecoder": VGGDecoder,
     "VGGGlobalPoolFLOMultiLayerNEGPMI": VGGGlobalPoolFLOMultiLayerNEGPMI,
+    "DenseNCEWeights": DenseNCEWeights,
 }
 
 config_ah_module_dict = {
@@ -83,6 +84,7 @@ config_ah_module_dict = {
 
 config_rpl_module_dict = {
     "RecRelu" : rpl.RecRelu,
+    "RecSTE" : rpl.RecSTE,
 }
 
 config_centroid_modules_dict = {

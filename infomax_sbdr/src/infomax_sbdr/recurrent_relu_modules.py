@@ -4,9 +4,9 @@ from jax import jit, grad, vmap
 import flax.linen as nn
 from typing import Sequence, Callable, Tuple
 from functools import partial
-import infomax_sbdr.binary_comparisons as bc
+import infomax_sbdr.utils as ut
 
-""" Convolutional modules """
+""" Custom RPL-style module """
 
 class RecReluLayer(nn.Module):
     """
@@ -22,9 +22,12 @@ class RecReluLayer(nn.Module):
     features: int
 
     def setup(self):
+        # Forward
         self.fwd_layer = nn.Dense(self.features)
-        self.rec_layer_input = nn.Dense(self.features, use_bias=False)
+        # Recurrent
+        self.rec_layer_input = nn.Dense(self.features, use_bias=True)
         self.rec_layer_lateral = nn.Dense(self.features, use_bias=False)
+        # Prediction
         self.pred_layer = nn.Dense(self.features)
 
     def __call__(self, x, state):
@@ -33,18 +36,24 @@ class RecReluLayer(nn.Module):
         # we will then scan this function over time
 
         # # Forward-only encoder
-        a_fwd = jax.nn.tanh(self.fwd_layer(x))
-        # binary activation
+        a_fwd = self.fwd_layer(x)
+        a_fwd = ut.symlog(a_fwd)
         z_fwd = (a_fwd > 0).astype(np.float32)
         
         # # Recurrent module
-        a_rec = np.tanh(self.rec_layer_input(a_fwd*z_fwd) + self.rec_layer_lateral(state["a_rec"] * state["z_rec"]))
-        # binary activation
+        a_rec = (
+            # Normal
+            # self.rec_layer_input(z_fwd*a_fwd)
+            # Stop gradient
+            self.rec_layer_input(jax.lax.stop_gradient(z_fwd*a_fwd))
+            + self.rec_layer_lateral(state["z_rec"]*state["a_rec"])
+        )
+        a_rec = ut.symlog(a_rec)
         z_rec = (a_rec > 0).astype(np.float32)
 
         # # Prediction head
-        a_pred = jax.nn.tanh(self.pred_layer(a_rec * z_rec))
-        # binary activation
+        a_pred = self.pred_layer(z_rec*a_rec)
+        a_pred = ut.symlog(a_pred)
         z_pred = (a_pred > 0).astype(np.float32)
 
         outs = {
@@ -158,5 +167,149 @@ class RecRelu(nn.Module):
 
             # set input sequence for the next layer
             x_seq = jax.lax.stop_gradient(out["a_rec"]*out["z_rec"])
+
+        return outs
+    
+
+""" Custom Vanilla Recurrent Layer """
+
+class RecSTELayer(nn.Module):
+    """
+    """
+    features: int
+
+    def setup(self):
+        # Recurrent
+        self.rec_input = nn.Dense(
+            self.features,
+            use_bias=True,
+            kernel_init=nn.initializers.lecun_normal(),
+        )
+        self.rec_lateral = nn.Dense(
+            self.features,
+            use_bias=False,
+            kernel_init=nn.initializers.zeros,
+        )
+
+    def __call__(self, x, state):
+        # assume input x is of shape 
+        # (*batch_dims, features), i.e., a single time-step
+        # we will then scan this function over time
+        
+        # Recurrent
+        a_inp = self.rec_input(x)
+        a_lat = self.rec_lateral(state["a"]*state["z"])
+        a = a_inp + a_lat
+        # apply output activation function
+        z = (a > 0).astype(np.float32)
+
+
+        outs = {
+            "a": a,
+            "z": z,
+        }
+
+        new_state = {
+            "a": a,
+            "z": z,
+        }
+
+        return new_state, outs
+    
+    def init_state_from_input(self, key, x):
+        # assume input x is of shape 
+        # (*batch_dims, features), i.e., a single time-step
+        # we will then scan this function over time
+        
+        # init a random recurrent state a
+        a = 0.1 * jax.random.normal(key, shape=(*x.shape[:-1], self.features)).astype(np.float32)
+        # init z from a
+        z = (a > 0).astype(np.float32)
+
+        return {
+            "a": a,
+            "z": z
+        }
+    
+    def scan(self, x_seq, state):
+        # assume input x_seq is of shape 
+        # (*batch_dims, time, features), i.e., we have a sequence of time-steps
+
+        def f_scan(crr, inp):
+            x = inp
+            state = crr
+            new_state, outs = self(x, state)
+            return new_state, outs
+
+        # move time axis in firt position, required by jax.lax.scan
+        x_seq = np.moveaxis(x_seq, -2, 0)
+
+        # scan
+        _, outs = jax.lax.scan(f_scan, state, x_seq)
+
+        # move back time axis
+        outs = jax.tree.map(lambda x: np.moveaxis(x, 0, -2), outs)
+
+        return outs
+        
+    
+
+class RecSTE(nn.Module):
+    """
+    A stack of RecSTELayers, with gradient blocking in the middle
+    """
+    features: Sequence[int]
+
+    def setup(self):
+        self.layers = [
+            RecSTELayer(features) for features in self.features
+        ]
+
+    @nn.nowrap
+    def init_state_from_input(self, key, x):
+        states = []
+        # note, we cannot call init_state_from_input for each layer, as we also need to do this 
+        # before initialization of the module, to call init on the nn.Module
+        # at that time, self.layers is not accessible, unless we use apply
+        batch_shape = x.shape[:-1]
+        for f in self.features:
+            # init a random recurrent state a
+            key, _ = jax.random.split(key)
+            a = 0.1 * jax.random.normal(key, shape=(*batch_shape, f)).astype(np.float32)
+            # init z from a
+            z = (a > 0).astype(np.float32)
+            states.append({
+                "a": a,
+                "z": z
+            })
+
+        return states
+    
+    def __call__(self, x, states):
+
+        new_states, outs = [], []
+
+        for l_idx, layer in enumerate(self.layers):
+            st, out = layer(x, states[l_idx])
+            new_states.append(st)
+            outs.append(out)
+
+            # set input to next layer
+            x = jax.lax.stop_gradient(out["z"])
+
+        return new_states, outs
+    
+    def scan(self, x_seq, states):
+
+        outs = []
+
+        # here we just call sequentially the scan of each layer
+        for l_idx, layer in enumerate(self.layers):
+            # note, scan does not return the final state
+            out = layer.scan(x_seq, states[l_idx])
+            outs.append(out)
+
+            # set input sequence for the next layer
+            x_seq = jax.lax.stop_gradient(out["z"])
 
         return outs

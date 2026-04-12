@@ -1,22 +1,33 @@
 [model]
-type = "RecRelu"
+type = "DenseNCEWeights"
 seed = 45
+activation = "mish"
+out_activation = "hard_threshold"
 [model.kwargs]
-features = [128, 128]
+out_features = 512
+in_features = 784
    
 [dataset]
-[dataset.transform.specaugment.kwargs]
-n_time_masks = 2
-max_time_width = 5 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
-n_freq_masks = 2
-max_freq_width = 2
+[dataset.transform.normalization]
+mean = [0.2860]
+std = [0.3530]
+[dataset.transform.resized_crop]
+size = 28
+scale = [0.9, 1.0]
+ratio = [0.99, 1.01]
+[dataset.transform.flip]
+p = 0.5
+[dataset.transform.grayscale]
+p = 0.1
+[dataset.transform.color_jitter]
+brightness = 0.15
+contrast = 0.15
+saturation = 0.15
+hue = 0.15
 
 [training]
 epochs = 150
 batch_size = 256
-layer_idx = 1 # we train a single layer at a time, they are independent
-pred_horizon = 4 # how many steps head we train to predict (only the selected layer)
-exc_weight = 0.001 # weight for regularization pushing to increased pre-activation
 
 [training.checkpoint]
 save = true
@@ -37,14 +48,14 @@ eps = 1.0e-1
 [training.optimizer]
 type = "adamw"
 [training.optimizer.kwargs]
-learning_rate = 0.01
-weight_decay = 0.0001
+learning_rate = 0.001
+weight_decay = 0.00001
 
 [validation]
 split = 0.16
 eval_interval = 12
 [validation.dataloader]
-batch_size = 128
+batch_size = 256
 [validation.sim_fn]
 type = "log_and"
 quantile = 0.9

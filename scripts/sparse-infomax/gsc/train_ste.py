@@ -1,7 +1,7 @@
 import os
 import argparse
 
-default_model = "rpl"
+default_model = "ste"
 default_number = "1"
 default_cuda = "0"
 
@@ -270,6 +270,7 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
+
 """---------------------"""
 """ Loss Function """
 """---------------------"""
@@ -280,55 +281,38 @@ sim_fn = partial(
 )
 
 def flo_loss(
-    outs_layer,
+    outs_layer_1,
+    outs_layer_2,
 ):
 
     eps = model_config["training"]["loss"]["sim_fn"]["kwargs"]["eps"]
 
-    a_fwd = outs_layer["a_fwd"]
-    z_fwd = outs_layer["z_fwd"]
-    a_rec = outs_layer["a_rec"]
-    z_rec = outs_layer["z_rec"]
-    a_pred = outs_layer["a_pred"]
-    z_pred = outs_layer["z_pred"]
+    a1 = outs_layer_1["a"]
+    z1 = outs_layer_1["z"]
+    a2 = outs_layer_2["a"]
+    z2 = outs_layer_2["z"]
 
-    za_fwd = z_fwd*a_fwd
-    za_rec = z_rec*a_rec
-    za_pred = z_pred*a_pred
+    za1 = z1*a1
+    za2 = z2*a2
+    za1_avg = za1.reshape((-1, za1.shape[-1])).mean(0)
+    za2_avg = za2.reshape((-1, za2.shape[-1])).mean(0)
 
-    za_fwd_avg = za_fwd.reshape((-1, za_fwd.shape[-1])).mean(0)
-    za_rec_avg = za_rec.reshape((-1, za_rec.shape[-1])).mean(0)
-    za_pred_avg = za_pred.reshape((-1, za_pred.shape[-1])).mean(0)
-
-    # # # Encoder InfoNCE
-    # separate everything
-    p_ii_fwd = (za_fwd * za_fwd).sum(-1) + eps
-    p_avg_fwd = (za_fwd * za_fwd_avg).sum(-1) + eps
-    flo_fwd_val = -np.log(p_ii_fwd / p_avg_fwd)
-    flo_fwd_val = flo_fwd_val.mean()
-
+    # steps ahead to make the prediction
     pred_horizon = model_config["training"]["pred_horizon"]
 
     # # # Prediction infoNCE
-    # Stop the gradient on target (classic JEPA trick)
-    p_ii_pred = (za_pred[..., :-pred_horizon, :] * jax.lax.stop_gradient(za_fwd[..., pred_horizon:, :])).sum(-1) + eps
-    p_avg_pred = (za_pred[..., :-pred_horizon, :] * jax.lax.stop_gradient(za_fwd_avg)).sum(-1) + eps
-    flo_pred_val = -np.log(p_ii_pred / p_avg_pred)
-    flo_pred_val = flo_pred_val.mean()
+    p_ii_12 = (za1[..., :-pred_horizon, :] * jax.lax.stop_gradient(za2[..., pred_horizon:, :])).sum(-1) + eps
+    p_ii_21 = (za2[..., :-pred_horizon, :] * jax.lax.stop_gradient(za1[..., pred_horizon:, :])).sum(-1) + eps
+    p_avg_12 = (za1[..., :-pred_horizon, :] * za2_avg).sum(-1) + eps
+    p_avg_21 = (za2[..., :-pred_horizon, :] * za1_avg).sum(-1) + eps
 
-    # # # Recurrent InfoNCE (separate all latent states)
-    p_ii_rec = (za_rec * za_rec).sum(-1) + eps
-    p_avg_rec = (za_rec * za_rec_avg).sum(-1) + eps
-    flo_rec_val = -np.log(p_ii_rec / p_avg_rec)
-    flo_rec_val = flo_rec_val.mean()
-
-    # Compute vumulative loss
-    flo_val = flo_fwd_val + 1.0 * flo_pred_val + flo_rec_val
+    flo_val_12 = -np.log(p_ii_12 / p_avg_12).mean()
+    flo_val_21 = -np.log(p_ii_21 / p_avg_21).mean()
+    flo_val = 0.5 * (flo_val_12 + flo_val_21)
 
     aux = {
-        "flo_fwd": flo_fwd_val,
-        "flo_pred": flo_pred_val,
-        "flo_rec": flo_rec_val,
+        "flo_12": flo_val_12,
+        "flo_21": flo_val_21,
     }
 
     return flo_val, aux
@@ -348,7 +332,7 @@ key_1, key_2 = jax.random.split(key)
 outs_1 = forward(variables, xs[:,1:], key_1)
 outs_2 = forward(variables, xs[:,:-1], key_2)
 
-loss = flo_loss_jitted(outs_1[model_config["training"]["layer_idx"]])
+loss = flo_loss_jitted(outs_1[model_config["training"]["layer_idx"]], outs_2[model_config["training"]["layer_idx"]])
 
 print(f"\tFLO Loss: {loss}")
 
@@ -411,7 +395,7 @@ def compute_metrics(outs):
     metrics = {}
 
     for l_idx, l_out in enumerate(outs):
-        for k in ["z_fwd", "a_fwd", "z_rec", "a_rec","z_pred", "a_pred"]:
+        for k in ["a", "z"]:
             
             # per-unit average
             unit_avg = np.mean(l_out[k].reshape((-1, l_out[k].shape[-1])), axis=0)
@@ -423,10 +407,10 @@ def compute_metrics(outs):
 
 
             metrics.update(
-                {f"unit_{k}_{l_idx}/{kk}": v for kk, v in zip(Q_KEYS, qs_unit_val)}
+                {f"unit_{l_idx}_{k}/{kk}": v for kk, v in zip(Q_KEYS, qs_unit_val)}
             )
             metrics.update(
-                {f"sample_{k}_{l_idx}/{kk}": v for kk, v in zip(Q_KEYS, qs_sample_val)}
+                {f"sample_{l_idx}_{k}/{kk}": v for kk, v in zip(Q_KEYS, qs_sample_val)}
             )
 
     return metrics
@@ -450,7 +434,7 @@ def train_step(state, batch):
         # Apply the model
         # BATCH_NORM - change here
         # outs_1, mutable_updates_1 = forward(
-        outs = forward(
+        outs_1 = forward(
             {
                 "params": params,
                 # # BATCH_NORM - change here
@@ -459,21 +443,30 @@ def train_step(state, batch):
             batch["x_1"],
             batch["key_1"],
         )
+        outs_2 = forward(
+            {
+                "params": params,
+                # # BATCH_NORM - change here
+                # "batch_stats": state["variables"]["batch_stats"],
+            },
+            batch["x_2"],
+            batch["key_2"],
+        )
 
         # select only outputs from the layer that is being trained
-        outs_layer = outs[l_index]
+        outs_layer_1 = outs_1[l_index]
+        outs_layer_2 = outs_2[l_index]
         # outs_1 = jax.tree.map(lambda x : x[:, :-1], outs_layer)
         # outs_2 = jax.tree.map(lambda x : x[:, 1:], outs_layer)
 
         # Compute FLO loss
-        flo_loss_val, aux = flo_loss(outs_layer)
+        flo_loss_val, aux = flo_loss(outs_layer_1, outs_layer_2)
         loss_val = flo_loss_val
 
         # add small positive pressure on all pre-activations
-        exc_fwd = outs_layer["a_fwd"]
-        exc_rec = outs_layer["a_rec"]
-        exc_pred = outs_layer["a_pred"]
-        loss_val = loss_val - model_config["training"]["exc_weight"] * (exc_fwd + exc_rec + exc_pred).mean()
+        exc_1 = outs_layer_1["a"]
+        exc_2 = outs_layer_2["a"]
+        loss_val = loss_val - model_config["training"]["exc_weight"] * (exc_1 + exc_2).mean()
 
         
         # compute useful metrics for logging
@@ -538,7 +531,7 @@ def eval_step(state, batch):
         # outs_2 = jax.tree.map(lambda x : x[:, 1:], outs_layer)
 
         # Compute FLO loss
-        flo_loss_val, aux = flo_loss(outs_layer)
+        flo_loss_val, aux = flo_loss(outs_layer, outs_layer)
         loss_val = flo_loss_val
 
         metrics = compute_metrics(outs)
@@ -571,8 +564,8 @@ key_1, key_2 = jax.random.split(key)
 batch = {
     "x_1": xs,
     "key_1": key_1,
-    # "x_2": xs_2,
-    # "key_2": key_2,
+    "x_2": xs,
+    "key_2": key_2,
 }
 
 state, metrics, grads = train_step(state, batch)
@@ -594,7 +587,6 @@ pprint(gradients_are_zero)
 print(f"\tGradients are NAN:")
 pprint(gradients_are_nan)
 
-
 """------------------"""
 """ Logging Utils """
 """------------------"""
@@ -607,7 +599,7 @@ def compute_activation_imgs(outs):
 
     for l_idx, l_out in enumerate(outs):
         # # binary activations
-        for k_z, k_a in zip(["z_fwd", "z_rec","z_pred"], ["a_fwd", "a_rec","a_pred"]):
+        for k_z, k_a in zip(["z",], ["a",]):
             
             # select only a few outputs (e.g., 8) from the batch size
             _z = l_out[k_z][:N_MAX]
@@ -616,7 +608,6 @@ def compute_activation_imgs(outs):
             # z is already in 0-1, a needs to be 
             # minmaxed from [-1, 1] back to [0, 1]
             _a = (_a + 1) / 2
-            _a = np.clip(_a, 0, 1)
 
             # add last channel (grayscale)
             _z = _z.reshape((*_z.shape, 1))
@@ -671,10 +662,12 @@ try:
             enumerate(dataloader_train), leave=False, total=len(dataloader_train)
         ):
 
-            key, _ = jax.random.split(key, 2)
+            key, subkey = jax.random.split(key, 2)
             batch = {
-                "x_1": xs, # jax.device_put(xs_1),
+                "x_1": xs,
                 "key_1": key,
+                "x_2": xs,
+                "key_2": subkey,
             }
             state, metrics, grads = train_step(state, batch)
             LAST_STEP = state["step"].item()

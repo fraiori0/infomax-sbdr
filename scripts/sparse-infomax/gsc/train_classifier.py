@@ -159,6 +159,8 @@ xs, labels = next(iter(dataloader_train))
 print(f"xs: {xs.shape}")
 print(f"labels: {labels.shape}")
 
+
+exit()
 """---------------------"""
 """ Init Model """
 """---------------------"""

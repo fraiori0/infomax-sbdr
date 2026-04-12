@@ -36,3 +36,30 @@ def bernoulli_uniform(
         return np.array(scale, dtype) * jax.random.bernoulli(key, p, shape).astype(dtype)
     
     return init
+
+def non_negative(
+    scale: float = 1.0,
+    dtype = np.float32,
+):
+    """Builds an initializer that returns an array
+   with only positive values
+
+    Args:
+        scale: optional; scale of the normal distribution.
+        dtype: optional; the initializer's default dtype.
+
+    Returns:
+        An initializer that returns arrays whose values are distributed like absolute
+        values of a gaussian distribution.
+    """
+
+    def init(key,
+            shape,
+            dtype = dtype,
+            out_sharding = None):
+        
+        dtype = jax.dtypes.canonicalize_dtype(dtype)
+
+        return np.array(scale, dtype) * np.abs(jax.random.normal(key, shape).astype(dtype))
+    
+    return init
