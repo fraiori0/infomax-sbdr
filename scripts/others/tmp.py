@@ -1,58 +1,60 @@
-import numpy as np
+import jax
+from jax import vmap, grad, jit
+import jax.numpy as np
 import plotly.graph_objects as go
 import sklearn as skl
 from sklearn.decomposition import PCA
 
-SEED = 9876
+np.set_printoptions(precision=4, suppress=True)
 
-N_IN_FEATURES = 256
-N_OUT_FEATURES = 64
-N_SAMPLES = 1000
+SEED = 986
 
-N_GAUSSIANS = 300
-
-rng = np.random.default_rng(SEED)
-
-# Generate samples as a mixture of Gaussians
-mus = rng.uniform(-1.0, 1.0, size=(N_GAUSSIANS, N_IN_FEATURES))
-stds = rng.uniform(0.1, 0.5, size=(N_GAUSSIANS, N_IN_FEATURES))
-# Sample from each gaussian, fpr each sample
-gaussian_samples = rng.normal(mus, stds, size=(N_SAMPLES, N_GAUSSIANS,N_IN_FEATURES))
-# random mask selecting one gaussian per sample
-mask = rng.choice(N_GAUSSIANS, size=(N_SAMPLES,))
-samples = gaussian_samples[np.arange(N_SAMPLES), mask]
+in_features = 9
+out_features = 11
 
 
-# Perform PCA decomposition
-pca = PCA(n_components=N_OUT_FEATURES, random_state=SEED)
-pca.fit(samples)
-# Take the principal vector
-pcs = pca.components_
-print(pcs.shape)
+key = jax.random.PRNGKey(SEED)
 
-# Randomly change the sign of each principal vector
-signs = rng.choice([-1, 1], size=(N_OUT_FEATURES,))
-pcs_rndsign = pcs * signs[..., None]
+def f(params, x):
+    al_e = x @ params["wl_e"]
+    al_i = x @ params["wl_i"]
+    a = al_e - al_i
 
-# Perform projection on both
-samples_pca = pca.transform(samples)
-samples_pca_rndsign = (samples[..., None, :] * pcs_rndsign).mean(axis=-1)
+    zero_e = al_e - jax.lax.stop_gradient(al_e)
+    a = np.where(a > 0, a, zero_e)
 
-print(samples_pca.shape)
-print(samples_pca_rndsign.shape)
+    f_val = a.mean()
 
-# Hard thresholding with Heaviside step function
-xs = (samples_pca > 0).astype(np.float64)
-xs_rndsign = (samples_pca_rndsign > 0).astype(np.float64)
+    aux = {
+        "a": a,
+    }
 
-# Plot covariance matrix of binarized data
+    return f_val, aux
 
-covs = np.cov(xs.T)
-covs_rndsign = np.cov(xs_rndsign.T)
+df = grad(f, argnums=0, has_aux=True)
 
-fig = go.Figure(data=go.Heatmap(z=covs))
-fig.show()
 
-fig = go.Figure(data=go.Heatmap(z=covs_rndsign))
-fig.show()
+key, subkey = jax.random.split(key, 2)
+params = {
+    "wl_e": jax.random.normal(key, (in_features, out_features)),
+    "wl_i": jax.random.normal(subkey, (in_features, out_features)),
+}
+key, _ = jax.random.split(key, 2)
+x = jax.random.normal(key, (in_features,))
+
+
+# Compute f
+f_val, aux = f(params, x)
+print(f_val)
+
+print(aux["a"].shape)
+print(aux["a"])
+
+df_val, aux = df(params, x)
+
+for i in range(out_features):
+    print(f"\na: {aux['a'][i]}")
+    print(f"wl_e: {df_val['wl_e'][:, i]}")
+    print(f"wl_i: {df_val['wl_i'][:, i]}")
+
 

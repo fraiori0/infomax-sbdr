@@ -1,0 +1,516 @@
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] =  "1"
+
+from functools import partial
+import argparse
+from time import time
+from datetime import datetime
+from typing import Callable, Any
+
+import jax
+from jax import vmap, grad, jit
+import jax.numpy as np
+import optax
+import orbax.checkpoint
+from flax.training import train_state
+from pprint import pprint
+import toml
+
+import numpy as onp
+
+import infomax_sbdr as sbdr
+
+from torch.utils.tensorboard import SummaryWriter
+import torch
+from torchvision import transforms as tv_transforms
+
+import cv2
+from tqdm import tqdm
+
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+
+from sklearn.svm import LinearSVC
+
+# np.set_printoptions(precision=4, suppress=True)
+
+BINARIZE = False  # whether to binarize the outputs or not
+BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is True
+BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
+
+# remember to change the pooling function in model definition, if using global pool model
+default_model = "tcn"
+default_number = "1" 
+default_checkpoint_subfolder = "manual_select"
+default_step = 16
+
+# base folder
+base_folder = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
+    os.pardir,
+    os.pardir,
+)
+base_folder = os.path.normpath(base_folder)
+
+
+"""---------------------"""
+""" Argument parsing """
+"""---------------------"""
+
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+parser.add_argument(
+    "-m",
+    "--model",
+    type=str,
+    help="Name of model to train",
+    default=default_model,
+)
+parser.add_argument(
+    "-n",
+    "--number",
+    type=str,
+    help="Number of model to train",
+    default=default_number,
+)
+
+args = parser.parse_args()
+
+
+"""---------------------"""
+""" Import model config """
+"""---------------------"""
+model_folder = os.path.join(
+    base_folder,
+    "resources",
+    "models",
+    "gsc",
+    args.model,
+    args.number,
+)
+
+# import the elman_config.toml
+with open(os.path.join(model_folder, "config.toml"), "r") as f:
+    model_config = toml.load(f)
+
+print(f"\nLoaded model config from:\n\t{model_folder}")
+pprint(model_config)
+
+"""---------------------"""
+""" Dataloader and Transform """
+"""---------------------"""
+
+data_folder = os.path.join(
+    base_folder,
+    "resources",
+    "datasets",
+    "gsc",
+)
+
+MAX_SAMPLES: int | None = None # 2050          # ← set to e.g. 500 for quick testing
+CACHE_DIR:   str | None = "./cache"     # ← set to None to skip disk caching
+
+dataset_train = sbdr.GSCDataset(
+    root        = data_folder,
+    split       = "train",
+    precompute  = True,
+    augment     = None,
+    max_samples = MAX_SAMPLES,
+    cache_dir   = CACHE_DIR,
+)
+
+dataset_val = sbdr.GSCDataset(
+    root        = data_folder,
+    split       = "val",
+    precompute  = True,
+    augment     = None,
+    max_samples = MAX_SAMPLES,
+    cache_dir   = CACHE_DIR,
+)
+
+dataloader_train = sbdr.NumpyLoader(
+    dataset_train,
+    batch_size=model_config["training"]["batch_size"],
+    shuffle=False,
+    drop_last=False,
+    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
+)
+
+dataloader_val = sbdr.NumpyLoader(
+    dataset_val,
+    batch_size=model_config["validation"]["dataloader"]["batch_size"],
+    shuffle=False,
+    drop_last=False,
+    generator=torch.Generator().manual_seed(model_config["model"]["seed"]),
+)
+
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+print(f"Train samples : {len(dataset_train):>7,}   batches: {len(dataloader_train):,}")
+print(f"Val   samples : {len(dataset_val):>7,}   batches: {len(dataloader_val):,}")
+# print(f"Spectrogram   : ({N_MELS} mels × {N_FRAMES} frames)")
+print(f"Cache dir     : {CACHE_DIR}")
+
+
+print("\nSample shapes")
+xs, labels = next(iter(dataloader_train))
+print(f"xs: {xs.shape}")
+print(f"labels: {labels.shape}")
+
+
+
+"""---------------------"""
+""" Init Model """
+"""---------------------"""
+
+print("\nInitializing model")
+
+model_class = sbdr.config_rpl_module_dict[model_config["model"]["type"]]
+
+model_eval = model_class(
+    **model_config["model"]["kwargs"],
+)
+
+# # # Initialize parameters
+# Take some data
+x_seq, labels = next(iter(dataloader_train))
+# Generate key
+key = jax.random.key(model_config["model"]["seed"])
+# Init params
+variables = model_eval.init(key, x_seq)
+
+# # # Initialize the optimizer as well, to properly restore the full checkpoint
+optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
+optimizer = optimizer(**model_config["training"]["optimizer"]["kwargs"])
+
+state = {
+    "variables": variables,
+    "opt_state": optimizer.init(variables["params"]),
+    "step": default_step,
+}
+
+
+"""---------------------"""
+""" Import checkpoint """
+"""---------------------"""
+
+print("\nImport checkpoint")
+
+checkpoint_manager = orbax.checkpoint.CheckpointManager(
+    directory=os.path.join(model_folder, default_checkpoint_subfolder),
+    # checkpointers=orbax.checkpoint.PyTreeCheckpointer(),
+    options=orbax.checkpoint.CheckpointManagerOptions(
+        save_interval_steps=model_config["training"]["checkpoint"]["save_interval"],
+        max_to_keep=model_config["training"]["checkpoint"]["max_to_keep"],
+        step_format_fixed_length=5,
+    ),
+)
+
+state = checkpoint_manager.restore(
+    step=default_step, args=orbax.checkpoint.args.StandardRestore(state)
+)
+
+print(f"\tDict of variables: \n\t{state['variables'].keys()}")
+
+variables = state["variables"]
+
+
+# print the shapes nicely
+def get_shapes(nested_dict):
+    return jax.tree_util.tree_map(lambda x: x.shape, nested_dict)
+
+
+pprint(get_shapes(variables))
+
+
+"""---------------------"""
+""" Forward Pass """
+"""---------------------"""
+
+print("\nForward pass jitted")
+
+
+def forward_eval(variables, xs, key):
+    out = model_eval.apply(
+        variables,
+        xs,
+    )
+    return out
+
+
+forward_eval_jitted = jit(forward_eval)
+
+# test the forward pass
+xs, labels = next(iter(dataloader_train))
+key = jax.random.key(model_config["model"]["seed"])
+
+outs = forward_eval_jitted(variables, xs, key)
+
+print(f"\tInput shape: {xs.shape}")
+print(f"\tOutput shapes:")
+pprint(get_shapes(outs))
+
+# print(f"\nTest time for one train epoch:")
+# # test time for one epoch
+# t0 = time()
+# for xs, labels in tqdm(dataloader_train):
+#     forward_eval_jitted(variables, xs)
+
+# print(f"\tTime for one epoch: {time() - t0}")
+
+"""---------------------"""
+""" Utils """
+"""---------------------"""
+
+def extract_features(outs):
+    f = outs[-1]["y"]
+    # f = f.mean(axis=-2)
+    f = f.reshape((*f.shape[:-2], -1))
+
+    return f
+
+"""---------------------"""
+""" Forward pass on training set """
+"""---------------------"""
+
+print("\nForward pass on the whole training set")
+
+# xs, labels = next(iter(dataloader_train))
+# outs, _ = forward_eval_jitted(variables, xs, key)
+# sem_labels = np.zeros((labels.shape[-1], outs["z"].shape[-1]))
+# label_count = np.zeros(labels.shape[-1])
+
+key = jax.random.key(model_config["model"]["seed"])
+
+# record output and labels
+zs = []
+labels_categorical = []
+
+for xs, labels in tqdm(dataloader_train):
+    # encode using a forward pass
+    key, _ = jax.random.split(key)
+    outs = forward_eval_jitted(variables, xs, key)
+
+    zs.append(extract_features(outs))
+    labels_categorical.append(labels)
+
+
+zs = np.concatenate(zs, axis=0)
+labels_categorical = np.concatenate(labels_categorical, axis=0)
+
+print(f"\tEncoding shape (zs): {zs.shape}")
+print(f"\tLabels shape (categorical): {labels_categorical.shape}")
+
+"""---------------------"""
+""" Forward pass on validation set """
+"""---------------------"""
+
+print("\nForward pass on the whole validation set")
+
+zs_val = []
+labels_categorical_val = []
+
+for xs, labels in tqdm(dataloader_val):
+    # encode using a forward pass
+    key, _ = jax.random.split(key)
+    outs = forward_eval_jitted(variables, xs, key)
+
+    zs_val.append(extract_features(outs))
+    labels_categorical_val.append(labels)
+
+zs_val = np.concatenate(zs_val, axis=0)
+labels_categorical_val = np.concatenate(labels_categorical_val, axis=0)
+
+print(f"\tEncoding shape (zs_val): {zs_val.shape}")
+print(f"\tLabels shape (categorical): {labels_categorical_val.shape}")
+
+"""---------------------"""
+""" Save activations """
+"""---------------------"""
+
+# save the activations to a compressed npz file
+save_folder = os.path.join(
+    model_folder,
+    "activations",
+)
+os.makedirs(save_folder, exist_ok=True)
+
+onp.savez_compressed(
+    os.path.join(save_folder, f"activations_chkp_{default_step:03d}.npz"),
+    zs=onp.array(zs),
+    labels_categorical=onp.array(labels_categorical),
+    zs_val=onp.array(zs_val),
+    labels_categorical_val=onp.array(labels_categorical_val),
+)
+
+"""---------------------"""
+""" Statistics on unit activity """
+"""---------------------"""
+
+# print("\nStatistics on unit activity")
+
+# # Quantiles
+# qs = np.array((0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99))
+# per_unit_qs = np.quantile(zs.mean(axis=0), qs)
+# per_sample_qs = np.quantile(zs.mean(axis=-1), qs)
+
+# print(f"\tPer-unit quantiles: {per_unit_qs}")
+# print(f"\tPer-sample quantiles: {per_sample_qs}")
+
+# # # # Histograms
+# print(f"\nHistograms")
+# n_bins = 20
+# # # Per-Unit Average Activity
+# bin_edges = np.geomspace(zs.mean(axis=0).min() + 1e-8, zs.mean(axis=0).max(), n_bins)
+# bin_edges = np.append(bin_edges, 1.5) - 1e-8
+# per_unit_hist, _ = np.histogram(zs.mean(axis=0), bins=bin_edges)
+# print(f"\tBin Count:\n\t\t{per_unit_hist}")
+# print(f"\tBin Centers:\n\t\t{((bin_edges[:-1] + bin_edges[1:]) / 2.0)}")
+
+# # # # Sharpness of unit activity
+# th_low = np.array((0.01, 0.05, 0.1, 0.15))
+# th_high = 1 - th_low
+# # Count the relative number of units below th_low and above th_high, and in the middle
+# count_low = (zs[None] < th_low[:, None, None]).mean(axis=(-1, -2))
+# count_middle = (
+#     (zs[None] > th_low[:, None, None]) & (zs[None] < th_high[:, None, None])
+# ).mean(axis=(-1, -2))
+# count_high = (zs[None] > th_high[:, None, None]).mean(axis=(-1, -2))
+# print(f"\nSharpness of unit activity:")
+# print(f"\tLow: {count_low}")
+# print(f"\tMiddle: {count_middle}")
+# print(f"\tHigh: {count_high}")
+
+# # # # Unused units
+# # Count the relative number of units that are never active above some threshold
+# th_active = np.array((0.001, 0.01, 0.05, 0.1, 0.15))
+# count_activated = (zs > th_active[:, None, None]).sum(axis=(-2))
+# used_less_than = np.array((1.5, 2.5, 5.5, 10.5, 20.5))
+# count_unused = (count_activated[:, None] < used_less_than[None, :, None]).sum(axis=-1)
+# print(f"\nUnused units:")
+# for i, th in enumerate(th_active):
+#     print(f"\tThreshold {th:.3f}")
+#     print(
+#         f"\t  {count_unused[i]}"
+#     )
+
+
+"""---------------------"""
+""" K-Nearest Neighbors Classification """
+"""---------------------"""
+
+# print("\nK-Nearest Neighbors Classification")
+
+# # # # Compute "distances" using the similarity metrics
+# sim_fn = jit(partial(
+#     sbdr.config_similarity_dict[model_config["validation"]["sim_fn"]["type"]],
+#     **model_config["validation"]["sim_fn"]["kwargs"],
+# ))
+
+# ds_val = -sim_fn(zs_val[:, None], zs[None, :])
+
+# print(f"\tDistances shape: {ds_val.shape}")
+
+# # For each example in the validation set, find the k nearest neighbors in the training set
+# k = 19
+# # Use jax.lax.top_k to find the index of the k nearest neighbors
+# nearest_indices = jax.lax.top_k(-ds_val, k=k)[1]
+# # np.argpartition(ds_val, kth=k, axis=-1)[:, :k]
+# print(f"\tNearest indices shape: {nearest_indices.shape}")
+# # Select the labels of the k nearest neighbors
+# nearest_labels = labels_onehot[nearest_indices]
+# print(f"\tNearest labels shape: {nearest_labels.shape}")
+
+# # Check how many of the k nearest neighbors have the same label as the validation example
+# correct_mask = (labels_onehot_val[:, None] * nearest_labels).sum(axis=-1)  # shape: (n_val, k)
+# print(f"\tCorrect mask shape: {correct_mask.shape}")
+
+# # Compute the accuracy as the fraction of correct neighbors
+# acc_knn = correct_mask.mean()
+
+# correct_avg = correct_mask.mean(axis=-1)
+
+# print(f"\tKNN accuracy: {acc_knn}")
+# print(f"\tKNN accuracy per example: {correct_avg.mean()},  std: {correct_avg.std()}")
+
+# # Compute accuracy according to neighbor vote (with equal weights)
+# average_label = (nearest_labels.mean(axis=-2))
+# print(f"\tAverage label shape: {average_label.shape}")
+# # print(average_label[:5])
+# # Convert to categorical labels
+# labels_categorical_knn_val = average_label.argmax(axis=-1)
+# # Compute accuracy
+# acc_knn_vote = (labels_categorical_knn_val == labels_categorical_val).mean()
+
+# print(f"\tKNN accuracy (vote)")
+# print(f"\t\tK={k} : {acc_knn_vote:.4f}")
+
+"""---------------------"""
+""" Linear Support Vector Classification """
+"""---------------------"""
+
+# print("\nLinear Support Vector Classification")
+
+
+
+# print(f"\tLabels train shape (categorical): {labels_categorical.shape}")
+# print(f"\tLabels val shape (categorical): {labels_categorical_val.shape}")
+
+
+# svm_model = LinearSVC(
+#     random_state=0,
+#     tol=1e-4,
+#     multi_class="ovr",
+#     intercept_scaling=1,
+#     C=5,
+#     penalty="l1",
+#     loss="squared_hinge",
+# )
+
+# print("\nTraining Linear SVM on the training set")
+# t0 = time()
+
+# svm_model.fit(
+#     zs,
+#     labels_categorical,
+# )
+# acc_train = svm_model.score(zs, labels_categorical)
+# acc_val = svm_model.score(zs_val, labels_categorical_val)
+
+# print(f"\t  Time: {time() - t0:.2f} seconds")
+
+# print(f"\tAccuracy on training set: {acc_train}")
+
+# print(f"\tAccuracy on validation set: {acc_val}")
+
+
+# fit also a linear logistic regression for comparison
+from sklearn.linear_model import LogisticRegression
+
+logreg_model = LogisticRegression(
+    random_state=0,
+    tol=1e-4,
+    multi_class="multinomial",
+    C=1,
+    penalty="l1",
+    solver="saga",
+    verbose=1,
+)
+
+print("\nTraining Linear Logistic Regression on the training set")
+t0 = time()
+
+logreg_model.fit(
+    zs,
+    labels_categorical,
+)
+
+acc_train_logreg = logreg_model.score(zs, labels_categorical)
+acc_val_logreg = logreg_model.score(zs_val, labels_categorical_val)
+print(f"\t  Time: {time() - t0:.2f} seconds")
+print(f"\tAccuracy on training set: {acc_train_logreg}")
+print(f"\tAccuracy on validation set: {acc_val_logreg}")
+
+print("Tot classes:", logreg_model.classes_)

@@ -15,6 +15,7 @@ import infomax_sbdr.neural_gas as neural_gas
 import infomax_sbdr.spike_eligibility_modules as se_modules  
 import infomax_sbdr.utils as ut
 import infomax_sbdr.recurrent_relu_modules as rpl
+import infomax_sbdr.timeconv_hdc_modules as tcn
 
 
 """
@@ -85,6 +86,8 @@ config_ah_module_dict = {
 config_rpl_module_dict = {
     "RecRelu" : rpl.RecRelu,
     "RecSTE" : rpl.RecSTE,
+    "RecSTEClassifier": rpl.RecSTEClassifier,
+    "TCN": tcn.TCN,
 }
 
 config_centroid_modules_dict = {

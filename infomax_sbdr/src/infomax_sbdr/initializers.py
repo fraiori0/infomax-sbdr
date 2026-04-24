@@ -60,6 +60,38 @@ def non_negative(
         
         dtype = jax.dtypes.canonicalize_dtype(dtype)
 
-        return np.array(scale, dtype) * np.abs(jax.random.normal(key, shape).astype(dtype))
+        return np.array(scale, dtype) * np.clip(jax.random.normal(key, shape).astype(dtype), min=0)
     
     return init
+
+def simplex(
+    scale: float = 1.0,
+    dtype = np.float32,
+):
+    """
+    Return an initializers that return random NON-NEGATIVE weights with a simplex constraint (i.e., L1 norm equal to 1)
+
+    Args:
+        scale: optional; scale of the simplex/L1-norm value (default to 1).
+        dtype: optional; the initializer's default dtype.
+    """
+
+
+    def init(key,
+            shape,
+            dtype = dtype,
+            out_sharding = None):
+        
+        dtype = jax.dtypes.canonicalize_dtype(dtype)
+
+        # initialize random non-negative vectors
+        weights = np.abs(jax.random.normal(key, shape).astype(dtype))
+
+        # project to have L1 norm equal to scale ON THE FIRST AXIS
+        # which in Flax-like convention is the one related to input dimension
+        weights = weights * scale / np.sum(weights, axis=0, keepdims=True)
+
+        return 
+    
+    return init
+

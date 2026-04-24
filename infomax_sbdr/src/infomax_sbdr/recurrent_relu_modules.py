@@ -5,6 +5,7 @@ import flax.linen as nn
 from typing import Sequence, Callable, Tuple
 from functools import partial
 import infomax_sbdr.utils as ut
+import infomax_sbdr.initializers as my_inits
 
 """ Custom RPL-style module """
 
@@ -109,7 +110,6 @@ class RecReluLayer(nn.Module):
         return outs
         
     
-
 class RecRelu(nn.Module):
     """
     A stack of RecReluLayers, with gradient blocking in the middle
@@ -176,72 +176,105 @@ class RecRelu(nn.Module):
 class RecSTELayer(nn.Module):
     """
     """
-    features: int
+    in_features: int
+    out_features: int
 
     def setup(self):
-        # Recurrent
-        self.rec_input = nn.Dense(
-            self.features,
+        # # # Network weights
+        # Note, we consider only non-negative weights
+        
+        # Forward (excitatory) weights
+        self.w = self.param(
+            "w",
+            init_fn = nn.initializers.lecun_normal(),#my_inits.non_negative(scale=1.0/np.sqrt(self.in_features)),
+            shape = (self.in_features, self.out_features),
+            dtype = np.float32,
+        )
+
+        # Bias (homeostatic)
+        self.b = self.param(
+            "b",
+            nn.initializers.constant(0.0),
+            (self.out_features,),
+            np.float32
+        )
+
+        # Average  binary activation and average memory state
+        self.mem = nn.Dense(
+            self.out_features,
             use_bias=True,
             kernel_init=nn.initializers.lecun_normal(),
-        )
-        self.rec_lateral = nn.Dense(
-            self.features,
-            use_bias=False,
-            kernel_init=nn.initializers.zeros,
+            bias_init=nn.initializers.constant(0.0)
         )
 
-    def __call__(self, x, state):
+    def __call__(self, state, x):
         # assume input x is of shape 
         # (*batch_dims, features), i.e., a single time-step
-        # we will then scan this function over time
+        # we will then scan this function over a time axis in another method, using jax.lax.scan
         
-        # Recurrent
-        a_inp = self.rec_input(x)
-        a_lat = self.rec_lateral(state["a"]*state["z"])
-        a = a_inp + a_lat
-        # apply output activation function
-        z = (a > 0).astype(np.float32)
+        th = 0.3
+        gamma = 0.8
 
+        # Compute pre-activation
+        # a = ut.symlog(x @ self.w + self.b)
+        # a = ut.threshold_softgradient(x @ self.w + self.b)
+        a = jax.nn.sigmoid(x @ self.w + self.b)
+
+        # # Compute binary activation leaving linear gradient only on b
+        # zero_b = self.b - jax.lax.stop_gradient(self.b)
+        # z = zero_b + jax.lax.stop_gradient(a + self.b > 0).astype(np.float32)
+        z = (a > th).astype(np.float32)
+
+        # Update memory state using InfoNCE-like single step update
+        z_in = jax.lax.stop_gradient(z)
+        s_prev = state["s"] # jax.lax.stop_gradient(state["s"]) # 
+
+        r_in = np.concatenate((z_in, s_prev), axis=-1)
+        s = jax.nn.sigmoid(self.mem(r_in))
+        zs = (s > th).astype(np.float32)
+        # zs = s
 
         outs = {
             "a": a,
             "z": z,
+            "s": s,
+            "zs": zs,
         }
 
         new_state = {
-            "a": a,
-            "z": z,
+            "s": s,
         }
 
         return new_state, outs
     
+    @nn.nowrap
     def init_state_from_input(self, key, x):
-        # assume input x is of shape 
-        # (*batch_dims, features), i.e., a single time-step
-        # we will then scan this function over time
+        # Init a random recurrent state a
+        # Note: this method can be called without the "apply" method
         
-        # init a random recurrent state a
-        a = 0.1 * jax.random.normal(key, shape=(*x.shape[:-1], self.features)).astype(np.float32)
-        # init z from a
-        z = (a > 0).astype(np.float32)
+        batch_dims = x.shape[:-1]
+        s = np.zeros(shape=(*batch_dims, self.out_features), dtype=np.float32)
+        # eligibility traces for both input and state
+        e_z = np.zeros(shape=(*batch_dims, self.out_features), dtype=np.float32)
+        e_s = np.zeros(shape=(*batch_dims, self.out_features), dtype=np.float32)
 
         return {
-            "a": a,
-            "z": z
+            "s": s,
+            "e_z": e_z,
+            "e_s": e_s,
         }
     
-    def scan(self, x_seq, state):
+    def scan(self, state, x_seq):
         # assume input x_seq is of shape 
         # (*batch_dims, time, features), i.e., we have a sequence of time-steps
 
         def f_scan(crr, inp):
             x = inp
             state = crr
-            new_state, outs = self(x, state)
+            new_state, outs = self(state, x)
             return new_state, outs
 
-        # move time axis in firt position, required by jax.lax.scan
+        # move time axis in first position, required by jax.lax.scan
         x_seq = np.moveaxis(x_seq, -2, 0)
 
         # scan
@@ -258,12 +291,19 @@ class RecSTE(nn.Module):
     """
     A stack of RecSTELayers, with gradient blocking in the middle
     """
+    in_features: int
     features: Sequence[int]
 
     def setup(self):
-        self.layers = [
-            RecSTELayer(features) for features in self.features
-        ]
+        layers = []
+        f_in = self.in_features
+        for f_out in self.features:
+            layers.append(
+                RecSTELayer(f_in, f_out)
+            )
+            f_in = f_out
+
+        self.layers = layers
 
     @nn.nowrap
     def init_state_from_input(self, key, x):
@@ -273,43 +313,89 @@ class RecSTE(nn.Module):
         # at that time, self.layers is not accessible, unless we use apply
         batch_shape = x.shape[:-1]
         for f in self.features:
-            # init a random recurrent state a
-            key, _ = jax.random.split(key)
-            a = 0.1 * jax.random.normal(key, shape=(*batch_shape, f)).astype(np.float32)
-            # init z from a
-            z = (a > 0).astype(np.float32)
+            # init a recurrent state s
+            s= np.zeros((*batch_shape, f), dtype=np.float32)
             states.append({
-                "a": a,
-                "z": z
+                "s": s,
             })
 
         return states
     
-    def __call__(self, x, states):
+    def __call__(self, states, x):
 
         new_states, outs = [], []
 
         for l_idx, layer in enumerate(self.layers):
-            st, out = layer(x, states[l_idx])
+            st, out = layer(states[l_idx], x)
             new_states.append(st)
             outs.append(out)
 
-            # set input to next layer
-            x = jax.lax.stop_gradient(out["z"])
+            # set input to next layer (stop gradient)
+            x = jax.lax.stop_gradient(out["a"])
 
         return new_states, outs
     
-    def scan(self, x_seq, states):
+    def scan(self, states, x_seq):
 
         outs = []
 
         # here we just call sequentially the scan of each layer
-        for l_idx, layer in enumerate(self.layers):
+        for l_idx, l in enumerate(self.layers):
             # note, scan does not return the final state
-            out = layer.scan(x_seq, states[l_idx])
+            out = l.scan(states[l_idx], x_seq)
             outs.append(out)
 
             # set input sequence for the next layer
-            x_seq = jax.lax.stop_gradient(out["z"])
+            x_seq = jax.lax.stop_gradient(out["a"])
+
+        return outs
+    
+
+class RecSTEClassifier(RecSTE):
+    """
+    A stack of RecSTELayers, with gradient blocking in the middle, and a final single layer classifier
+    """
+    out_labels: int
+    classf_layer_idx: int = 0
+
+    def setup(self):
+        super().setup()
+
+        # final classifier layer
+        self.classifier = nn.Dense(self.out_labels)
+
+    def gather_input_classifier(self, outs):
+        return jax.lax.stop_gradient(outs[self.classf_layer_idx]["s"])
+    
+    def __call__(self, states, x):
+
+        new_states, outs = super().__call__(states, x)
+
+        # compute logits
+        logits = self.classifier(self.gather_input_classifier(outs))
+        for i in range(len(outs)):
+            outs[i]["logits"] = logits
+
+        return new_states, outs
+    
+    def scan(self, states, x_seq):
+
+        outs = []
+
+        # here we just call sequentially the scan of each layer
+        for l_idx, l in enumerate(self.layers):
+            # note, scan does not return the final state
+            out = l.scan(states[l_idx], x_seq)
+            outs.append(out)
+
+            # set input sequence for the next layer
+            x_seq = jax.lax.stop_gradient(out["s"])
+
+        # compute logits
+        logits = self.classifier(self.gather_input_classifier(outs))
+        # compute time-average 
+        # logits = np.mean(logits, axis=-2)
+        for i in range(len(outs)):
+            outs[i]["logits"] = logits
 
         return outs

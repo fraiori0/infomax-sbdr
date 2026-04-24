@@ -1,8 +1,12 @@
 [model]
-type = "RecSTE"
+type = "RecSTEClassifier"
 seed = 45
+p_target = 0.01
 [model.kwargs]
-features = [128,128]
+in_features = 40 # mel-spectrogram features
+features = [128]
+out_labels = 35
+classf_layer_idx = 0
    
 [dataset]
 [dataset.transform.specaugment.kwargs]
@@ -13,10 +17,9 @@ max_freq_width = 2
 
 [training]
 epochs = 150
-batch_size = 256
+batch_size = 128
 layer_idx = 0 # we train a single layer at a time, they are independent
-pred_horizon = 2 # how many steps ahead we train to predict (check also layer_idx, this will be applied to that layer)
-exc_weight = 0.001 # weight for regularization pushing to increased pre-activation
+pred_horizon = 1 # how many steps ahead we train to predict (check also layer_idx, this will be applied to that layer)
 
 [training.checkpoint]
 save = true
@@ -32,12 +35,12 @@ drop_last = true
 [training.loss.sim_fn]
 type = "log_and"
 [training.loss.sim_fn.kwargs]
-eps = 1.0e-2
+eps = 3.0e-2
 
 [training.optimizer]
 type = "adamw"
 [training.optimizer.kwargs]
-learning_rate = 0.003
+learning_rate = 0.001
 weight_decay = 0.00001
 
 [validation]

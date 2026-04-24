@@ -251,7 +251,7 @@ class DenseNCEWeights(nn.Module):
             "w",
             # should be initialized with all non-negative weights
             # using the proper initializers
-            init_fn=my_inits.non_negative(scale=0.1),
+            init_fn=my_inits.non_negative(scale=0.6),
             shape=(self.in_features, self.out_features),
             dtype=np.float32,
         )

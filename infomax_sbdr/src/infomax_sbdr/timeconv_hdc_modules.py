@@ -5,7 +5,7 @@ import flax.linen as nn
 from typing import Sequence, Callable, Tuple
 from functools import partial
 import infomax_sbdr.binary_comparisons as bc
-from math import prod
+import infomax_sbdr.utils as ut
 
 
 """ Index-Shift convolution kernels """
@@ -116,5 +116,123 @@ class ConvShift(nn.Module):
             outs.append(out)
             # set input to next layer
             x = jax.lax.stop_gradient(out["z_conv"])
+
+        return outs
+
+
+# standard Temporal Convolutional Network
+class TemporalConvLayer(nn.Module):
+    """Causal temporal convolutional layer.
+ 
+    Attributes:
+        features:      Number of output channels (kernel features).
+        kernel_size:   Length of the 1-D convolutional kernel (must be ≥ 1).
+        stride:        Step size along the time axis (default 1).
+        use_bias:      Whether to add a learnable bias term.
+        kernel_init:   Initialiser for the convolutional kernel weights.
+        bias_init:     Initialiser for the bias vector.
+    """
+ 
+    features: int
+    kernel_size: int
+    stride: int = 1
+    use_bias: bool = True
+ 
+    # ------------------------------------------------------------------
+    # setup — create sub-modules and validate hyper-parameters
+    # ------------------------------------------------------------------
+ 
+    def setup(self) -> None:
+        if self.kernel_size < 1:
+            raise ValueError(f"kernel_size must be ≥ 1, got {self.kernel_size}")
+        if self.stride < 1:
+            raise ValueError(f"stride must be ≥ 1, got {self.stride}")
+ 
+        # We manage causal padding ourselves, so the underlying Conv uses
+        # 'VALID' (no implicit padding).
+        self.conv = nn.Conv(
+            features=self.features,
+            kernel_size=(self.kernel_size,),
+            strides=(self.stride,),
+            padding="VALID",
+            use_bias=self.use_bias,
+        )
+ 
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """Apply causal temporal convolution.
+ 
+        Args:
+            x: Float array of shape ``(*batch_dims, time, features)``.
+               Any number of leading batch dimensions is supported.
+ 
+        Returns:
+            Float array of shape ``(*batch_dims, time_out, self.features)``
+            where ``time_out = ⌊(time − 1) / stride⌋ + 1``.
+        """
+
+        th = 0.3
+
+        # 1. Causal padding
+        # Prepend (kernel_size − 1) zero frames so each output step only
+        # sees the present and past inputs, never future ones.
+        #
+        # jnp.pad expects a sequence of (before, after) pairs, one per axis.
+        # Layout: [...batch axes..., time axis, feature axis]
+        pad_size = self.kernel_size - 1
+        if pad_size > 0:
+            pad_width = [(0, 0)] * (x.ndim - 2) + [(pad_size, 0), (0, 0)]
+            x = np.pad(x, pad_width)
+ 
+        # 2. Convolution (VALID — no further padding)
+        pre_activation = self.conv(x)
+        z = jax.nn.sigmoid(pre_activation)
+        y = ut.threshold_softgradient(pre_activation)
+
+        outs = {
+            "z": z,
+            "y": y,
+        }
+        return outs
+
+
+class TCN(nn.Module):
+    """Temporal Convolutional Network (TCN) with multiple layers.
+    """
+ 
+    features: Sequence[int]
+    kernel_sizes: Sequence[int]
+    strides: Sequence[int] = 1
+    use_bias: bool = True
+ 
+    def setup(self) -> None:
+        if len(self.features) != len(self.kernel_sizes):
+            raise ValueError("features and kernel_sizes must have the same length")
+        if isinstance(self.strides, int):
+            self.strides = [self.strides] * len(self.features)
+        elif len(self.strides) != len(self.features):
+            raise ValueError("strides must be an int or have the same length as features")
+ 
+        self.layers = [
+            TemporalConvLayer(
+                features=self.features[i],
+                kernel_size=self.kernel_sizes[i],
+                stride=self.strides[i],
+                use_bias=self.use_bias,
+            )
+            for i in range(len(self.features))
+        ]
+
+    def __call__(self, x):
+        th = 0.3
+
+        # return all intermediate outputs
+        outs = []
+        x_in = x
+        for layer in self.layers:
+            out = layer(x_in)
+            outs.append(out)
+            # input to next layer
+            x_in = jax.lax.stop_gradient(out["y"])
+            
 
         return outs

@@ -169,6 +169,19 @@ xs, labels = next(iter(dataloader_train))
 print(f"xs: {xs.shape}")
 print(f"labels: {labels.shape}")
 
+# Compute maximum and minimum per each feature across whole dataset 
+xmin = np.inf
+xmax = -np.inf
+for xs, _ in tqdm(dataloader_train, desc="Computing dataset min and max"):
+    batch_min = xs.reshape((-1, xs.shape[-1])).min(axis=0)
+    batch_max = xs.reshape((-1, xs.shape[-1])).max(axis=0)
+    xmin = np.minimum(xmin, batch_min)
+    xmax = np.maximum(xmax, batch_max)
+
+print(f"Min: {xmin}")
+print(f"Max: {xmax}")
+print(np.maximum(np.abs(xmin), np.abs(xmax)))
+
 
 """---------------------"""
 """ Init Network """
@@ -198,7 +211,7 @@ s0 = model.init_state_from_input(key, x_seq[..., 0, :])
 pprint(get_shapes(s0))
 
 # Init params
-variables = model.init(key, x_seq[..., 0, :], s0)
+variables = model.init(key, s0, x_seq[..., 0, :])
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
 
@@ -218,8 +231,8 @@ def forward(variables, xs, key):
     # scan over the sequence
     out = model.apply(
         variables,
-        xs,
         s0,
+        xs,
         method=model.scan,
     )
     return out
@@ -231,8 +244,8 @@ def forward_eval(variables, xs, key):
     # scan over the sequence
     out = model_eval.apply(
         variables,
-        xs,
         s0,
+        xs,
         method=model_eval.scan,
     )
     return out
@@ -270,7 +283,6 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
-
 """---------------------"""
 """ Loss Function """
 """---------------------"""
@@ -279,6 +291,85 @@ sim_fn = partial(
     sbdr.config_similarity_dict[model_config["training"]["loss"]["sim_fn"]["type"]],
     **model_config["training"]["loss"]["sim_fn"]["kwargs"],
 )
+
+def w_infonce(w):
+    # Compute an InfoNCE loss with custom critic, given a weight matrix 
+    # the weight matrix is assumed to be of shape (in_features, out_features)
+    # and InfoNCE is computed to separate weights across units
+
+    eps = model_config["training"]["loss"]["sim_fn"]["kwargs"]["eps"]
+
+    w = w.T # reshape to (out_features, in_features)
+    w_avg = w.mean(0)
+
+    p_ii = (w*w).sum(-1) + eps
+    p_avg = (w*w_avg).sum(-1) + eps
+    w_loss = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "norm" : np.linalg.norm(w, axis=-1).mean()
+    }
+
+    return w_loss, aux
+
+
+def encoder_infonce(a):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    # compute a predictive InfoNCE loss
+
+    eps = model_config["training"]["loss"]["sim_fn"]["kwargs"]["eps"]
+    pred_horizon = model_config["training"]["pred_horizon"]
+
+    a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+
+    p_ii = (a * a).sum(-1) + eps
+    p_avg = (a * a_avg).sum(-1) + eps
+
+    loss_val = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "loss" : loss_val,
+    }
+
+    return loss_val, aux
+
+def memory_infonce(z_query, s_query, s):
+    zq_avg = z_query.reshape((-1, z_query.shape[-1])).mean(0)
+    sq_avg = s_query.reshape((-1, s_query.shape[-1])).mean(0)
+
+    eps = model_config["training"]["loss"]["sim_fn"]["kwargs"]["eps"]
+
+    p_szq = (s * z_query).sum(-1) + eps
+    p_szq_avg = (s * zq_avg).sum(-1) + eps
+    p_ssq = (s * s_query).sum(-1) + eps 
+    p_ssq_avg = (s * sq_avg).sum(-1) + eps
+
+    z_loss = -np.log(p_szq / p_szq_avg).mean()
+    s_loss = -np.log(p_ssq / p_ssq_avg).mean()
+
+    loss_val = 0.5 * (z_loss + s_loss)
+
+    aux = {
+        "z_loss" : z_loss,
+        "s_loss" : s_loss,
+    }
+
+    return loss_val, aux
+
+def homeostatic_loss(z):
+    p_target = model_config["model"]["p_target"]
+    z_avg = z.reshape((-1, z.shape[-1])).mean(0)
+    
+    # Note, in the forward we setup z to have a gradient of 1 with respect to the bias
+    delta_p = ((p_target - z_avg)**2).mean()
+
+    aux = {
+        "delta_p": delta_p,
+    }
+
+    return delta_p,aux
+
 
 def flo_loss(
     outs_layer_1,
@@ -324,17 +415,14 @@ flo_loss_jitted = jit(flo_loss)
 xs, labels = next(iter(dataloader_train))
 
 key = jax.random.key(model_config["model"]["seed"])
-key_1, key_2 = jax.random.split(key)
 
-# BATCH_NORM - change here
-# outs_1, _ = forward(variables, xs_1, key_1)
-# outs_2, _ = forward(variables, xs_2, key_2)
-outs_1 = forward(variables, xs[:,1:], key_1)
-outs_2 = forward(variables, xs[:,:-1], key_2)
+outs = forward(variables, xs, key)
 
-loss = flo_loss_jitted(outs_1[model_config["training"]["layer_idx"]], outs_2[model_config["training"]["layer_idx"]])
+w_loss_val, aux = w_infonce(variables["params"]["layers_0"]["w"])
+a_loss_val, aux = encoder_infonce(outs[0]["a"])
+m_loss_val, aux = memory_infonce(outs[0]["z_query"], outs[0]["s_query"], outs[0]["s"])
 
-print(f"\tFLO Loss: {loss}")
+print(f"\tLosses: w: {w_loss_val}, a: {a_loss_val}, m: {m_loss_val}")
 
 """---------------------"""
 """ Checkpointing """
@@ -432,48 +520,61 @@ def train_step(state, batch):
     
     def loss_fn(params):
         # Apply the model
-        # BATCH_NORM - change here
-        # outs_1, mutable_updates_1 = forward(
-        outs_1 = forward(
+        outs = forward(
             {
                 "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_1"],
             batch["key_1"],
         )
-        outs_2 = forward(
-            {
-                "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
-            },
-            batch["x_2"],
-            batch["key_2"],
-        )
 
         # select only outputs from the layer that is being trained
-        outs_layer_1 = outs_1[l_index]
-        outs_layer_2 = outs_2[l_index]
-        # outs_1 = jax.tree.map(lambda x : x[:, :-1], outs_layer)
-        # outs_2 = jax.tree.map(lambda x : x[:, 1:], outs_layer)
+        out_l = outs[l_index]
 
-        # Compute FLO loss
-        flo_loss_val, aux = flo_loss(outs_layer_1, outs_layer_2)
-        loss_val = flo_loss_val
+        # Compute loss for the weights
+        l_key = "layers_" + str(l_index)
+        wf = params[l_key]["wf"]
+        wl_e = params[l_key]["wl_e"]
+        wl_i = params[l_key]["wl_i"]
+        wf_loss_val, wf_aux = w_infonce(wf)
+        wl_e_loss_val, wl_e_aux = w_infonce(wl_e)
+        wl_i_loss_val, wl_i_aux = w_infonce(wl_i)
 
-        # add small positive pressure on all pre-activations
-        exc_1 = outs_layer_1["a"]
-        exc_2 = outs_layer_2["a"]
-        loss_val = loss_val - model_config["training"]["exc_weight"] * (exc_1 + exc_2).mean()
+        # Compute loss on the state
+        a_loss_val, a_aux = pred_infonce(out_l["a"])
+
+        # Compute homegeneous loss
+        h_loss_val = homeostatic_loss(out_l["z"])
+
+        
+        # Compute cumulative loss
+        loss_val = (
+            wf_loss_val
+            # + wl_e_loss_val 
+            # + wl_i_loss_val * 0.2
+            + a_loss_val
+            + h_loss_val * 10
+        )
+        
+        # Store losses
+        aux = {
+            "wf": wf_loss_val,
+            "wl_e": wl_e_loss_val,
+            "wl_i": wl_i_loss_val,
+            "a": a_loss_val,
+            "h": h_loss_val
+        }
 
         
         # compute useful metrics for logging
         metrics = compute_metrics(outs)
         # add flo and total loss
         for k, v in aux.items():
-            metrics.update({f"aux/{k}": v})
+            metrics.update({f"aux_losses_{l_index}/{k}": v})
+
+        for k, v in a_aux.items():
+            metrics.update({f"aux_losses_{l_index}/{k}": v})
+            
         metrics.update({f"loss/{l_index}": loss_val})
 
         others = {
@@ -490,7 +591,7 @@ def train_step(state, batch):
     (loss_val, (metrics, others)), grads = grad_fn(state["variables"]["params"])
     # update weights
     updates, opt_state = optimizer.update(grads, state["opt_state"], state["variables"]["params"])
-    state["variables"]["params"] = optax.apply_updates(
+    new_params = optax.apply_updates(
         state["variables"]["params"], updates
     )
     # Update optimizer state
@@ -499,6 +600,15 @@ def train_step(state, batch):
     # # BATCH_NORM - change here
     # # update batch stats
     # state["variables"]["batch_stats"] = others["mutable_updates"]["batch_stats"]
+
+    # Clip weights
+    l_key = "layers_" + str(l_index)
+    new_params[l_key]["wf"] = np.clip(new_params[l_key]["wf"], 0.0, 1.0)
+    new_params[l_key]["wl_e"] = np.clip(new_params[l_key]["wl_e"], 0.0, 1.0)
+    new_params[l_key]["wl_i"] = np.clip(new_params[l_key]["wl_i"], 0.0, 1.0)
+
+    # Set new params
+    state["variables"]["params"] = new_params
 
     # update step
     state["step"] += 1
@@ -513,31 +623,55 @@ def eval_step(state, batch):
 
     def loss_fn(params):
         # Apply the model
-        # BATCH_NORM - change here
-        # outs_1, mutable_updates_1 = forward_eval(
         outs = forward_eval(
             {
                 "params": params,
-                # # BATCH_NORM - change here
-                # "batch_stats": state["variables"]["batch_stats"],
             },
             batch["x_1"],
             batch["key_1"],
         )
         
         # select only outputs from the layer that is being trained
-        outs_layer = outs[l_index]
-        # outs_1 = jax.tree.map(lambda x : x[:, :-1], outs_layer)
-        # outs_2 = jax.tree.map(lambda x : x[:, 1:], outs_layer)
+        out_l = outs[l_index]
 
-        # Compute FLO loss
-        flo_loss_val, aux = flo_loss(outs_layer, outs_layer)
-        loss_val = flo_loss_val
+        # Compute loss for the weights
+        l_key = "layers_" + str(l_index)
+        wf = params[l_key]["wf"]
+        wl_e = params[l_key]["wl_e"]
+        wl_i = params[l_key]["wl_i"]
+        wf_loss_val, wf_aux = w_infonce(wf)
+        wl_e_loss_val, wl_e_aux = w_infonce(wl_e)
+        wl_i_loss_val, wl_i_aux = w_infonce(wl_i)
+
+        # Compute loss on the state
+        a_loss_val, a_aux = pred_infonce(out_l["a"])
+
+        # Compute homegeneous loss
+        h_loss_val = homeostatic_loss(out_l["z"])
+
+        
+        # Compute cumulative loss
+        loss_val = (
+            wf_loss_val
+            + wl_e_loss_val 
+            + wl_i_loss_val 
+            + a_loss_val * 3
+            + h_loss_val * 10
+        )
+        
+        # Store losses
+        aux = {
+            "wf": wf_loss_val,
+            "wl_e": wl_e_loss_val,
+            "wl_i": wl_i_loss_val,
+            "a": a_loss_val,
+            "h": h_loss_val
+        }
 
         metrics = compute_metrics(outs)
         # add flo and total loss
-        for k in aux.keys():
-            metrics.update({f"aux/{k}": aux[k]})
+        for k, v in aux.items():
+            metrics.update({f"aux_losses_{l_index}/{k}": v})
         metrics.update({f"loss/{l_index}": loss_val})
 
         others = {
@@ -587,6 +721,7 @@ pprint(gradients_are_zero)
 print(f"\tGradients are NAN:")
 pprint(gradients_are_nan)
 
+
 """------------------"""
 """ Logging Utils """
 """------------------"""
@@ -606,8 +741,8 @@ def compute_activation_imgs(outs):
             _a = l_out[k_a][:N_MAX]
 
             # z is already in 0-1, a needs to be 
-            # minmaxed from [-1, 1] back to [0, 1]
-            _a = (_a + 1) / 2
+            # put to 0-1
+            _a = (_a - _a.min()) / (_a.max() - _a.min())
 
             # add last channel (grayscale)
             _z = _z.reshape((*_z.shape, 1))

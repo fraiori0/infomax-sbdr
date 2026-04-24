@@ -1,0 +1,54 @@
+[model]
+type = "TCN"
+seed = 45
+p_target = 0.01
+[model.kwargs]
+features = [128, 128, 128]
+kernel_sizes = [3, 3, 3]
+strides = [2, 4, 6]
+   
+[dataset]
+[dataset.transform.specaugment.kwargs]
+n_time_masks = 2
+max_time_width = 5 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
+n_freq_masks = 2
+max_freq_width = 2
+
+[training]
+epochs = 60
+batch_size = 128
+num_classes = 35
+
+[training.checkpoint]
+save = true
+save_interval = 2 # epochs
+max_to_keep = 12
+
+[training.dataloader]
+shuffle = true
+# drop the last batch to avoid recompiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+
+[training.loss]
+eps = 3.0e-2
+w_eps = 1.0e-2
+
+[training.optimizer]
+type = "adamw"
+[training.optimizer.kwargs]
+learning_rate = 0.001
+weight_decay = 0.00001
+
+[validation]
+split = 0.16
+eval_interval = 12
+[validation.dataloader]
+batch_size = 128
+[validation.sim_fn]
+type = "log_and"
+quantile = 0.9
+[validation.sim_fn.kwargs]
+eps = 1.0e-2
+
+

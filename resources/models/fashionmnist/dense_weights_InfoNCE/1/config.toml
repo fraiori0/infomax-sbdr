@@ -4,7 +4,7 @@ seed = 45
 activation = "mish"
 out_activation = "hard_threshold"
 [model.kwargs]
-out_features = 512
+out_features = 128
 in_features = 784
    
 [dataset]
@@ -13,8 +13,8 @@ mean = [0.2860]
 std = [0.3530]
 [dataset.transform.resized_crop]
 size = 28
-scale = [0.9, 1.0]
-ratio = [0.99, 1.01]
+scale = [0.99, 1.0]
+ratio = [1.0, 1.0]
 [dataset.transform.flip]
 p = 0.5
 [dataset.transform.grayscale]
@@ -26,12 +26,12 @@ saturation = 0.15
 hue = 0.15
 
 [training]
-epochs = 150
-batch_size = 256
+epochs = 200
+batch_size = 128
 
 [training.checkpoint]
 save = true
-save_interval = 2 # epochs
+save_interval = 4 # epochs
 max_to_keep = 12
 
 [training.dataloader]

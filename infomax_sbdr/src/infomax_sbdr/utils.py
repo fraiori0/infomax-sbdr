@@ -10,15 +10,60 @@ import jax
 def conv1d(x, w, axis: int, mode="valid"):
     return np.apply_along_axis(lambda x: np.convolve(x, w, mode=mode), axis, x)
 
+def strided_time_conv(x, weights, stride):
+    """
+    x: shape (*batch_dims, time, features)
+    weights: shape (kernel_size,)
+    stride: int
+    """
+    *batch_dims, time, features = x.shape
+
+    # Collapse batch dims
+    x_reshaped = x.reshape(-1, time, features)  # (B, T, C)
+
+    # Add spatial dim structure expected by conv:
+    # (N, spatial, channels)
+    # For 1D conv: use (N, T, C)
+    
+    # Reshape to match conv_general_dilated expectations:
+    # (N, C, T)
+    x_conv = np.transpose(x_reshaped, (0, 2, 1))  # (B, C, T)
+
+    # Prepare kernel for depthwise conv:
+    kernel_size = weights.shape[0]
+
+    # Shape: (out_chan, in_chan/groups, kernel_size)
+    # For depthwise: out_chan = in_chan, groups = in_chan
+    kernel = np.tile(weights[None, None, :], (features, 1, 1))  # (C, 1, K)
+
+    # Perform convolution
+    y = jax.lax.conv_general_dilated(
+        x_conv,
+        kernel,
+        window_strides=(stride,),
+        padding="VALID",
+        dimension_numbers=("NCT", "OIT", "NCT"),
+        feature_group_count=features  # depthwise
+    )
+
+    # Back to (B, windows, features)
+    y = np.transpose(y, (0, 2, 1))
+
+    # Restore original batch dims
+    out_shape = (*batch_dims, y.shape[1], features)
+    return y.reshape(out_shape)
+
+
+
 def sigmoid_ste(x):
     """ Sigmoid activation with straight-through gradient """
     zero = x - jax.lax.stop_gradient(x)
     return zero + jax.nn.sigmoid(jax.lax.stop_gradient(x))
 
-def threshold_softgradient(x, threshold=0.0):
+def threshold_softgradient(x):
     """ Threshold function with the gradient of a sigmoid"""
-    zero = jax.nn.sigmoid(x-threshold) - jax.lax.stop_gradient(jax.nn.sigmoid(x-threshold))
-    return zero + ((x - threshold) >= 0).astype(x.dtype)
+    zero = jax.nn.sigmoid(x) - jax.lax.stop_gradient(jax.nn.sigmoid(x))
+    return zero + (x >= 0).astype(x.dtype)
 
 def hard_threshold(x):
     return (x > 0).astype(x.dtype)
@@ -30,6 +75,11 @@ def threshold_ste(x):
 
 def symlog(x):
     return np.sign(x) * np.log1p(np.abs(x))
+
+def threshold_symlog(x):
+    zero = symlog(x) - jax.lax.stop_gradient(symlog(x))
+    return zero + jax.lax.stop_gradient((x > 0).astype(x.dtype))
+
 
 def get_shapes(pytree):
     return jax.tree.map(lambda x: x.shape, pytree)

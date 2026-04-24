@@ -40,10 +40,10 @@ BINARIZE_THRESHOLD = None # threshold for binarization, only used if BINARIZE is
 BINARIZE_K = 15 # maximum number of non-zero elements to keep, if BINARIZE is True
 
 # remember to change the pooling function in model definition, if using global pool model
-default_model = "rpl"
+default_model = "ste"
 default_number = "1" 
 default_checkpoint_subfolder = "manual_select"
-default_step = 194
+default_step = 200
 
 # base folder
 base_folder = os.path.join(
@@ -160,7 +160,7 @@ print(f"xs: {xs.shape}")
 print(f"labels: {labels.shape}")
 
 
-exit()
+
 """---------------------"""
 """ Init Model """
 """---------------------"""
@@ -184,7 +184,7 @@ print(key.shape)
 s0 = model_eval.init_state_from_input(key, x_seq[..., 0, :])
 pprint(sbdr.get_shapes(s0))
 # Init params
-variables = model_eval.init(key, x_seq[..., 0, :], s0)
+variables = model_eval.init(key, s0, x_seq[..., 0, :])
 
 # # # Initialize the optimizer as well, to properly restore the full checkpoint
 optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
@@ -243,8 +243,8 @@ def forward_eval(variables, xs, key):
     # scan over the sequence
     out = model_eval.apply(
         variables,
-        xs,
         s0,
+        xs,
         method=model_eval.scan,
     )
     return out
@@ -270,7 +270,6 @@ pprint(get_shapes(outs))
 
 # print(f"\tTime for one epoch: {time() - t0}")
 
-exit()
 """---------------------"""
 """ Utils """
 """---------------------"""
@@ -278,8 +277,20 @@ exit()
 def extract_features(outs):
     z = []
     for l_idx in range(len(outs)):
-        # time average
-        z.append(outs[l_idx]["z_conv"].mean(axis=-2))
+        # # time average
+        # z.append(outs[l_idx]["s"].mean(axis=-2))
+        # strided averages concatenated
+        horizon = 10
+        stride = horizon // 2
+        kernel = np.ones((horizon,)) / horizon
+        f = sbdr.strided_time_conv(
+            outs[l_idx]["s"],
+            weights=kernel,
+            stride=stride,
+        )
+        # concatenate features at different times
+        f = f.reshape((*f.shape[:-2], -1))
+        z.append(f)
 
     return np.concatenate(z, axis=-1)
 
@@ -289,11 +300,12 @@ def extract_features(outs):
 
 print("\nForward pass on the whole training set")
 
-xs, labels = next(iter(dataloader_train))
-outs, _ = forward_eval_jitted(variables, xs)
-sem_labels = np.zeros((labels.shape[-1], outs["z"].shape[-1]))
-label_count = np.zeros(labels.shape[-1])
+# xs, labels = next(iter(dataloader_train))
+# outs, _ = forward_eval_jitted(variables, xs, key)
+# sem_labels = np.zeros((labels.shape[-1], outs["z"].shape[-1]))
+# label_count = np.zeros(labels.shape[-1])
 
+key = jax.random.key(model_config["model"]["seed"])
 
 # record output and labels
 zs = []
@@ -301,7 +313,8 @@ labels_categorical = []
 
 for xs, labels in tqdm(dataloader_train):
     # encode using a forward pass
-    outs = forward_eval_jitted(variables, xs)
+    key, _ = jax.random.split(key)
+    outs = forward_eval_jitted(variables, xs, key)
 
     zs.append(extract_features(outs))
     labels_categorical.append(labels)
@@ -324,7 +337,8 @@ labels_categorical_val = []
 
 for xs, labels in tqdm(dataloader_val):
     # encode using a forward pass
-    outs = forward_eval_jitted(variables, xs)
+    key, _ = jax.random.split(key)
+    outs = forward_eval_jitted(variables, xs, key)
 
     zs_val.append(extract_features(outs))
     labels_categorical_val.append(labels)
@@ -334,57 +348,6 @@ labels_categorical_val = np.concatenate(labels_categorical_val, axis=0)
 
 print(f"\tEncoding shape (zs_val): {zs_val.shape}")
 print(f"\tLabels shape (categorical): {labels_categorical_val.shape}")
-
-"""---------------------"""
-""" Statistics on unit activity """
-"""---------------------"""
-
-print("\nStatistics on unit activity")
-
-# Quantiles
-qs = np.array((0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99))
-per_unit_qs = np.quantile(zs.mean(axis=0), qs)
-per_sample_qs = np.quantile(zs.mean(axis=-1), qs)
-
-print(f"\tPer-unit quantiles: {per_unit_qs}")
-print(f"\tPer-sample quantiles: {per_sample_qs}")
-
-# # # Histograms
-print(f"\nHistograms")
-n_bins = 20
-# # Per-Unit Average Activity
-bin_edges = np.geomspace(zs.mean(axis=0).min() + 1e-8, zs.mean(axis=0).max(), n_bins)
-bin_edges = np.append(bin_edges, 1.5) - 1e-8
-per_unit_hist, _ = np.histogram(zs.mean(axis=0), bins=bin_edges)
-print(f"\tBin Count:\n\t\t{per_unit_hist}")
-print(f"\tBin Centers:\n\t\t{((bin_edges[:-1] + bin_edges[1:]) / 2.0)}")
-
-# # # Sharpness of unit activity
-th_low = np.array((0.01, 0.05, 0.1, 0.15))
-th_high = 1 - th_low
-# Count the relative number of units below th_low and above th_high, and in the middle
-count_low = (zs[None] < th_low[:, None, None]).mean(axis=(-1, -2))
-count_middle = (
-    (zs[None] > th_low[:, None, None]) & (zs[None] < th_high[:, None, None])
-).mean(axis=(-1, -2))
-count_high = (zs[None] > th_high[:, None, None]).mean(axis=(-1, -2))
-print(f"\nSharpness of unit activity:")
-print(f"\tLow: {count_low}")
-print(f"\tMiddle: {count_middle}")
-print(f"\tHigh: {count_high}")
-
-# # # Unused units
-# Count the relative number of units that are never active above some threshold
-th_active = np.array((0.001, 0.01, 0.05, 0.1, 0.15))
-count_activated = (zs > th_active[:, None, None]).sum(axis=(-2))
-used_less_than = np.array((1.5, 2.5, 5.5, 10.5, 20.5))
-count_unused = (count_activated[:, None] < used_less_than[None, :, None]).sum(axis=-1)
-print(f"\nUnused units:")
-for i, th in enumerate(th_active):
-    print(f"\tThreshold {th:.3f}")
-    print(
-        f"\t  {count_unused[i]}"
-    )
 
 """---------------------"""
 """ Save activations """
@@ -405,28 +368,56 @@ onp.savez_compressed(
     labels_categorical_val=onp.array(labels_categorical_val),
 )
 
-# exit()
-
-
 """---------------------"""
-""" Binarize/Sparsify encodings """
+""" Statistics on unit activity """
 """---------------------"""
 
-if BINARIZE:
-    print("\nBinarizing/Sparsifying the encodings")
-    print(f"\tBinarization threshold: {BINARIZE_THRESHOLD}")
-    print(f"\tMaximum number of non-zero elements: {BINARIZE_K}")
+# print("\nStatistics on unit activity")
 
-    def binarize_k(x, k):
-        # keep only the k-top largest values
-        idx_top_k = jax.lax.top_k(x, k)[1]
-        # set the rest to zero, keep the original value only for the k-top largest values
-        x_binarized = np.zeros_like(x).at[idx_top_k].set(x[idx_top_k])
-        return x_binarized
-    
-    binarize_k_jitted = jit(vmap(partial(binarize_k, k=BINARIZE_K)))
-    zs = binarize_k_jitted(zs)
-    zs_val = binarize_k_jitted(zs_val)
+# # Quantiles
+# qs = np.array((0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99))
+# per_unit_qs = np.quantile(zs.mean(axis=0), qs)
+# per_sample_qs = np.quantile(zs.mean(axis=-1), qs)
+
+# print(f"\tPer-unit quantiles: {per_unit_qs}")
+# print(f"\tPer-sample quantiles: {per_sample_qs}")
+
+# # # # Histograms
+# print(f"\nHistograms")
+# n_bins = 20
+# # # Per-Unit Average Activity
+# bin_edges = np.geomspace(zs.mean(axis=0).min() + 1e-8, zs.mean(axis=0).max(), n_bins)
+# bin_edges = np.append(bin_edges, 1.5) - 1e-8
+# per_unit_hist, _ = np.histogram(zs.mean(axis=0), bins=bin_edges)
+# print(f"\tBin Count:\n\t\t{per_unit_hist}")
+# print(f"\tBin Centers:\n\t\t{((bin_edges[:-1] + bin_edges[1:]) / 2.0)}")
+
+# # # # Sharpness of unit activity
+# th_low = np.array((0.01, 0.05, 0.1, 0.15))
+# th_high = 1 - th_low
+# # Count the relative number of units below th_low and above th_high, and in the middle
+# count_low = (zs[None] < th_low[:, None, None]).mean(axis=(-1, -2))
+# count_middle = (
+#     (zs[None] > th_low[:, None, None]) & (zs[None] < th_high[:, None, None])
+# ).mean(axis=(-1, -2))
+# count_high = (zs[None] > th_high[:, None, None]).mean(axis=(-1, -2))
+# print(f"\nSharpness of unit activity:")
+# print(f"\tLow: {count_low}")
+# print(f"\tMiddle: {count_middle}")
+# print(f"\tHigh: {count_high}")
+
+# # # # Unused units
+# # Count the relative number of units that are never active above some threshold
+# th_active = np.array((0.001, 0.01, 0.05, 0.1, 0.15))
+# count_activated = (zs > th_active[:, None, None]).sum(axis=(-2))
+# used_less_than = np.array((1.5, 2.5, 5.5, 10.5, 20.5))
+# count_unused = (count_activated[:, None] < used_less_than[None, :, None]).sum(axis=-1)
+# print(f"\nUnused units:")
+# for i, th in enumerate(th_active):
+#     print(f"\tThreshold {th:.3f}")
+#     print(
+#         f"\t  {count_unused[i]}"
+#     )
 
 
 """---------------------"""
@@ -544,3 +535,5 @@ acc_val_logreg = logreg_model.score(zs_val, labels_categorical_val)
 print(f"\t  Time: {time() - t0:.2f} seconds")
 print(f"\tAccuracy on training set: {acc_train_logreg}")
 print(f"\tAccuracy on validation set: {acc_val_logreg}")
+
+print("Tot classes:", logreg_model.classes_)

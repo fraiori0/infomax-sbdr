@@ -401,23 +401,26 @@ def flo_loss(
     eps = model_config["training"]["loss"]["sim_fn"]["kwargs"]["eps"]
 
     # take params
-    w = params["w"]
+    w = params["w"].T
     b = params["b"]
-    w_avg = w.mean(-1)
+    w_avg = w.mean(0)
 
-    z1 = outs_1["z"]
-    a1 = outs_1["a"]
+    z1, a1 = outs_1["z"], outs_1["a"]
+    z2, a2 = outs_2["z"], outs_2["a"]
+    # average pre-activation vector
+    a_avg_1 = a1.reshape((-1, a1.shape[-1])).mean(0)
+    a_avg_2 = a2.reshape((-1, a2.shape[-1])).mean(0)
 
-    z2 = outs_2["z"]
-    a2 = outs_2["a"]
-
-    # InfoNCE loss on the weights
-    p_ii_1 = a1 + eps
-    p_ii_2 = a2 + eps
-    p_avg = w_avg @ w + eps
-    flo_1_val = -np.log(p_ii_1 / p_avg)
-    flo_2_val = -np.log(p_ii_2 / p_avg)
-    flo_val = 0.5 * (flo_1_val.mean() + flo_2_val.mean())
+    # InfoNCE loss on activation
+    p_ii_1 = (a1 * a1).sum(-1) + eps
+    p_avg_1 = (a1 * a_avg_1).sum(-1) + eps
+    flo_act_val = -np.log(p_ii_1 / p_avg_1).mean()
+    # InfoNCE on the weights themselves
+    p_ii_w = (w * w).sum(-1) + eps
+    p_avg_w = (w * w_avg).sum(-1) + eps
+    flo_w_val = -np.log(p_ii_w / p_avg_w).mean()   
+    
+    flo_val = flo_act_val + flo_w_val
 
     return flo_val
 
@@ -536,15 +539,26 @@ def train_step(state, batch):
 
         # Compute FLO loss
         flo_loss_val = flo_loss(outs_1, outs_2, params)
+        # eps = 1e-1
+        # x = batch["x_1"]
+        # a = outs_1["a"]
+        # z = outs_1["z"]
+        # w = params["w"]
+        # w_avg = w.mean(-1)
+
+        # p_ii = (x @ w) + eps
+        # p_avg = (x * w_avg).sum(-1) + eps
+        # flo_loss_val = -np.log(p_ii / p_avg).mean()
+
         loss_val = flo_loss_val
 
-        # Homeostatic loss on the activations for the bias
-        p_target = 0.05
-        homeostatic_loss_val = 20 * (
-            ((p_target - outs_1["z"])**2).mean()
-            + ((p_target - outs_2["z"])**2).mean()
-        )
-        loss_val = loss_val + homeostatic_loss_val
+        # # Homeostatic loss on the activations for the bias
+        # p_target = 0.05
+        # homeostatic_loss_val = 20 * (
+        #     ((p_target - outs_1["z"])**2).mean()
+        #     + ((p_target - outs_2["z"])**2).mean()
+        # )
+        # loss_val = loss_val + homeostatic_loss_val
 
         # add some pressure to have the same sparsity in the samples
         # gradient should decrease _a_ for over-active samples, increase it for under-active (binary activation)
@@ -580,21 +594,27 @@ def train_step(state, batch):
 
         return loss_val, (metrics, others)
 
-    # compute gradient, loss, and aux
+    # Compute gradient, loss, and aux
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (loss_val, (metrics, others)), grads = grad_fn(state["variables"]["params"])
-    # update weights
+
+    # Update weights
     updates, opt_state = optimizer.update(grads, state["opt_state"], state["variables"]["params"])
-    state["variables"]["params"] = optax.apply_updates(
+    new_params = optax.apply_updates(
         state["variables"]["params"], updates
     )
-    # Update optimizer state
-    state["opt_state"] = opt_state
-
-    # CLIP weights
-    state["variables"]["params"]["w"] = np.clip(
-        state["variables"]["params"]["w"], 0, 1,
+    # # NORMALIZE weights to sum to 1 
+    # state["variables"]["params"]["w"] = state["variables"]["params"]["w"] / state["variables"]["params"]["w"].sum(axis=0, keepdims=True)
+    # CLIP weights (can also just be non-negativity constraint)
+    new_params["w"] = np.clip(
+        new_params["w"], 0, 1,
     )
+
+    # set new params
+    state["variables"]["params"] = new_params
+
+    # Update OPTIMIZER STATE
+    state["opt_state"] = opt_state
 
     # # BATCH_NORM - change here
     # # update batch stats
@@ -750,6 +770,8 @@ try:
     # convert to images
     activation_img = activation_to_img(outs["z"], normalize=False)
     cs = state["variables"]["params"]["w"].T
+    # normalize in 0-1
+    cs = cs / cs.max()
     # ss = jax.nn.softplus(state["variables"]["params"]["s"]["kernel"].T)
     centroid_img = activation_to_img(cs)
     # scale_image = activation_to_img(ss)
