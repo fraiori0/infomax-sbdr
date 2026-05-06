@@ -16,6 +16,7 @@ import infomax_sbdr.spike_eligibility_modules as se_modules
 import infomax_sbdr.utils as ut
 import infomax_sbdr.recurrent_relu_modules as rpl
 import infomax_sbdr.timeconv_hdc_modules as tcn
+import infomax_sbdr.transformer_hdc_modules as trhdc
 
 
 """
@@ -87,7 +88,10 @@ config_rpl_module_dict = {
     "RecRelu" : rpl.RecRelu,
     "RecSTE" : rpl.RecSTE,
     "RecSTEClassifier": rpl.RecSTEClassifier,
+    "SparseGRUClassifier": rpl.SparseGRUClassifier,
     "TCN": tcn.TCN,
+    "TCNPoolClassifier": tcn.TCNPoolClassifier,
+    "CyclicOuterLayer": trhdc.CyclicOuterLayer,
 }
 
 config_centroid_modules_dict = {

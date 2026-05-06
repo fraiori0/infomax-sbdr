@@ -11,10 +11,10 @@ from math import prod
 """ Custom Pool functions"""
 
 
-def or_pool(inputs, window_shape, strides=None, padding="VALID"):
-    y = 1.0 - inputs
-    y = nn.pool(y, 1.0, jax.lax.mul, window_shape, strides, padding)
-    return 1.0 - y
+# def or_pool(inputs, window_shape, strides=None, padding="VALID"):
+#     y = 1.0 - inputs
+#     y = nn.pool(y, 1.0, jax.lax.mul, window_shape, strides, padding)
+#     return 1.0 - y
 
 
 def and_pool(inputs, window_shape, strides=None, padding="VALID"):

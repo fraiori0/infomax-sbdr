@@ -7,6 +7,12 @@ from functools import partial
 import infomax_sbdr.binary_comparisons as bc
 import infomax_sbdr.utils as ut
 
+""" Custom pooling """
+
+def or_pool(inputs, window_shape, strides=None, padding="VALID"):
+    y = 1.0 - inputs
+    y = nn.pool(y, 1.0, jax.lax.mul, window_shape, strides, padding)
+    return 1.0 - y
 
 """ Index-Shift convolution kernels """
 
@@ -195,6 +201,93 @@ class TemporalConvLayer(nn.Module):
         return outs
 
 
+class TemporalConvPoolLayer(nn.Module):
+    """Causal temporal convolutional layer.
+ 
+    Attributes:
+        features:      Number of output channels (kernel features).
+        kernel_size:   Length of the 1-D convolutional kernel (must be ≥ 1).
+        kernel_stride: Step size along the time axis (default 1).
+        pool_size:     Length of the 1-D pooling kernel (must be ≥ 1).
+        pool_stride:   Step size along the time axis (default 1).
+        use_bias:      Whether to add a learnable bias term.
+        kernel_init:   Initialiser for the convolutional kernel weights.
+        bias_init:     Initialiser for the bias vector.
+    """
+ 
+    features: int
+    kernel_size: int
+    kernel_stride: int
+    pool_size: int
+    pool_stride: int
+    use_bias: bool = True
+ 
+    # ------------------------------------------------------------------
+    # setup — create sub-modules and validate hyper-parameters
+    # ------------------------------------------------------------------
+ 
+    def setup(self) -> None:
+        if self.kernel_size < 1:
+            raise ValueError(f"kernel_size must be ≥ 1, got {self.kernel_size}")
+        if self.kernel_stride < 1:
+            raise ValueError(f"stride must be ≥ 1, got {self.kernel_stride}")
+ 
+        # We manage causal padding ourselves, so the underlying Conv uses
+        # 'VALID' (no implicit padding).
+        self.conv = nn.Conv(
+            features=self.features,
+            kernel_size=(self.kernel_size,),
+            strides=(self.kernel_stride,),
+            padding="VALID",
+            use_bias=self.use_bias,
+        )
+ 
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """Apply causal temporal convolution.
+ 
+        Args:
+            x: Float array of shape ``(*batch_dims, time, features)``.
+               Any number of leading batch dimensions is supported.
+ 
+        Returns:
+            Float array of shape ``(*batch_dims, time_out, self.features)``
+            where ``time_out = ⌊(time − 1) / stride⌋ + 1``.
+        """
+
+        th = 0.3
+
+        # 1. Causal padding
+        # Prepend (kernel_size − 1) zero frames so each output step only
+        # sees the present and past inputs, never future ones.
+        #
+        # jnp.pad expects a sequence of (before, after) pairs, one per axis.
+        # Layout: [...batch axes..., time axis, feature axis]
+        pad_size = self.kernel_size - 1
+        if pad_size > 0:
+            pad_width = [(0, 0)] * (x.ndim - 2) + [(pad_size, 0), (0, 0)]
+            x = np.pad(x, pad_width)
+ 
+        # 2. Convolution (VALID — no further padding)
+        pre_activation = self.conv(x)
+        z = jax.nn.sigmoid(pre_activation)
+        y = ut.threshold_softgradient(pre_activation)
+
+        # Aggregate temporally using max_pool (we can use jax.lax.reduce_max)
+        p = nn.max_pool(
+            y, # z,
+            window_shape=(self.pool_size,),
+            strides=(self.pool_stride,),
+            padding="SAME",
+        )
+
+        outs = {
+            "z": z,
+            "y": y,
+            "p": p,
+        }
+        return outs
+
+
 class TCN(nn.Module):
     """Temporal Convolutional Network (TCN) with multiple layers.
     """
@@ -236,3 +329,84 @@ class TCN(nn.Module):
             
 
         return outs
+
+
+class TCNPoolClassifier(nn.Module):
+    """Temporal Convolutional Network (TCN) with multiple layers and pooling after convolutions.
+    And a final linear layer for classification using outer product of 
+    sparse binary activations from the last two layers.
+    """
+ 
+    features: Sequence[int]
+    kernel_sizes: Sequence[int]
+    kernel_strides: Sequence[int]
+    pool_sizes: Sequence[int]
+    pool_strides: Sequence[int]
+    class_features: int
+    use_bias: bool = True
+    stop_grad: bool = True
+ 
+    def setup(self) -> None:
+        if len(self.features) != len(self.kernel_sizes):
+            raise ValueError("features and kernel_sizes must have the same length")
+        if isinstance(self.kernel_strides, int):
+            self.kernel_strides = [self.strides] * len(self.features)
+        elif len(self.kernel_strides) != len(self.features):
+            raise ValueError("strides must be an int or have the same length as features")
+ 
+        self.layers = [
+            TemporalConvPoolLayer(
+                features=self.features[i],
+                kernel_size=self.kernel_sizes[i],
+                kernel_stride=self.kernel_strides[i],
+                pool_size=self.pool_sizes[i],
+                pool_stride=self.pool_strides[i],
+                use_bias=self.use_bias,
+            )
+            for i in range(len(self.features))
+        ]
+
+        # input to the dense module is the flattened
+        # outer product of the sparse representation in the two last layers
+        self.classifier = nn.Dense(self.class_features)
+
+    def __call__(self, x):
+        th = 0.3
+
+        # # # Forward psss
+        # return all intermediate outputs
+        outs = []
+        x_in = x
+        for layer in self.layers:
+
+            out = layer(x_in)
+            outs.append(out)
+            
+            # Input to next layer
+            x_in = out["p"]
+            if self.stop_grad:
+                x_in = jax.lax.stop_gradient(x_in)
+                
+        
+        # # # Classifier
+        # Compute outer product of the last two last layers' encodings
+        idx_h = max(0, len(self.layers)-2)
+        idx_g = len(self.layers)-1
+        # We use p so that it has the same time dimension than y at the next layer
+        h = outs[idx_h]["p"]
+        g = outs[idx_g]["z"]
+        # # Should we stop the gradient here?
+        # h = jax.lax.stop_gradient(h)
+        # g = jax.lax.stop_gradient(g)
+        # Compute outer product on feature dimension
+        hg = h[..., :, None] * g[..., None, :]
+        # Flatten last two dimensions
+        hg = hg.reshape((*hg.shape[:-2], -1))
+        # Compute linear layer
+        logit = self.classifier(hg)
+
+        aux = {
+            "logit": logit,
+        }
+
+        return outs, aux

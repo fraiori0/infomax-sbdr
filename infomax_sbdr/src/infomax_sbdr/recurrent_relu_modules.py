@@ -399,3 +399,164 @@ class RecSTEClassifier(RecSTE):
             outs[i]["logits"] = logits
 
         return outs
+
+class SparseGRULayer(nn.Module):
+    """
+    GRU-like implementation, supposed to be used with sparse activations
+    """
+
+    features: int
+
+    def setup(self):
+        self.forward = nn.Dense(self.features)
+        self.reset = nn.Dense(self.features)
+
+    def __call__(self, state, x):
+        # Single time step, x assumed of shape (*, features)
+
+        z_prev = state["z"]
+
+        r = jax.nn.tanh(self.reset(np.concatenate((x, z_prev), axis=-1)))
+        h = jax.nn.sigmoid(self.forward(np.concatenate((x, r*z_prev), axis=-1)))
+        
+        # softXOR to compute the new state
+        z = h + z_prev - 2 * h * z_prev
+
+        out = {
+            "h": h,
+            "z": z,
+        }
+
+        state = {
+            "z": z,
+        }
+
+        return state, out
+    
+    
+    @nn.nowrap
+    def init_state_from_input(self, key, x):
+        # Init a random recurrent state a
+        # Note: this method can be called without the "apply" method, i.e., before initialization
+        
+        batch_dims = x.shape[:-1]
+        z = np.zeros(shape=(*batch_dims, self.features), dtype=np.float32)
+
+        return {
+            "z": z,
+        }
+    
+    def scan(self, state, x_seq):
+        # assume input x_seq is of shape 
+        # (*batch_dims, time, features), i.e., we have a sequence of time-steps
+
+        def f_scan(crr, inp):
+            x = inp
+            state = crr
+            new_state, outs = self(state, x)
+            return new_state, outs
+
+        # move time axis in firt position, required by jax.lax.scan
+        x_seq = np.moveaxis(x_seq, -2, 0)
+
+        # scan
+        _, outs = jax.lax.scan(f_scan, state, x_seq)
+
+        # move back time axis
+        outs = jax.tree.map(lambda x: np.moveaxis(x, 0, -2), outs)
+
+        return outs
+
+class SparseGRU(nn.Module):
+    """
+    A stack of SparseGRULayers
+    """
+    features: Sequence[int]
+    stop_grad: bool
+
+    def setup(self):
+        self.layers = [SparseGRULayer(f) for f in self.features]
+    
+    @nn.nowrap
+    def init_state_from_input(self, key, x):
+        # Init a random recurrent state a
+        # Note: this method can be called without the "apply" method
+        states = []
+        batch_shape = x.shape[:-1]
+        for f in self.features:
+            # init a recurrent state s
+            z= np.zeros((*batch_shape, f), dtype=np.float32)
+            states.append({
+                "z": z,
+            })
+
+        return states
+    
+    def out_to_next(self, out):
+        # given the output of a single layer, create the input to the next layer
+        # Here is the single point to control whether we have or not gradient flow
+        x = out["z"]
+        if self.stop_grad:
+            x = jax.lax.stop_gradient(x)
+
+        return x
+    
+    def __call__(self, states, x):
+
+        new_states, outs = [], []
+
+        for l_idx, layer in enumerate(self.layers):
+            st, out = layer(states[l_idx], x)
+            new_states.append(st)
+            outs.append(out)
+
+            # set input to next layer
+            x = self.out_to_next(out)
+
+        return new_states, outs
+    
+    def scan(self, states, x_seq):
+
+        outs = []
+
+        # here we just call sequentially the scan of each layer
+        for l_idx, l in enumerate(self.layers):
+            # note, scan does not return the final state
+            out = l.scan(states[l_idx], x_seq)
+            outs.append(out)
+
+            # set input sequence for the next layer
+            x_seq = self.out_to_next(out)
+
+        return outs
+    
+
+class SparseGRUClassifier(SparseGRU):
+    """
+    A stack of SparseGRULayers with a final classifier head
+    """
+    out_labels: int
+
+    def setup(self):
+        super().setup()
+
+        # final classifier layer
+        self.classifier = nn.Dense(self.out_labels)
+
+    
+    def gather_input_classifier(self, outs):
+        return outs[-1]["z"]
+    
+    def __call__(self, states, x):
+        new_states, outs = super().__call__(states, x)
+        logits = self.classifier(self.gather_input_classifier(outs))
+        for i in range(len(outs)):
+            outs[i]["logits"] = logits
+        return new_states, outs
+    
+    def scan(self, states, x_seq):
+        outs = super().scan(states, x_seq)
+        logits = self.classifier(self.gather_input_classifier(outs))
+        for i in range(len(outs)):
+            outs[i]["logits"] = logits
+        return outs
