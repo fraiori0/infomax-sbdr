@@ -91,6 +91,7 @@ config_rpl_module_dict = {
     "SparseGRUClassifier": rpl.SparseGRUClassifier,
     "TCN": tcn.TCN,
     "TCNPoolClassifier": tcn.TCNPoolClassifier,
+    "TCNPoolClassifierMulti": tcn.TCNPoolClassifierMulti,
     "CyclicOuterLayer": trhdc.CyclicOuterLayer,
 }
 

@@ -1,13 +1,13 @@
 [model]
 type = "TCNPoolClassifier"
-seed = 45
+seed = 46
 p_target = 0.01
 [model.kwargs]
-features = [128, 128, 128]
+features = [256, 512, 512]
 kernel_sizes = [3, 3, 3]
 kernel_strides = [1, 1, 1]
-pool_sizes = [3, 2, 2]
-pool_strides = [2, 2, 2]
+pool_sizes = [3, 3, 3]
+pool_strides = [3, 3, 3]
 class_features = 35 # number of classes
 stop_grad = false
    
@@ -20,7 +20,7 @@ max_freq_width = 2
 
 [training]
 epochs = 60
-batch_size = 128
+batch_size = 256
 num_classes = 35
 
 [training.checkpoint]
@@ -37,6 +37,7 @@ drop_last = true
 [training.loss]
 eps = 1.0e-1
 w_eps = 1.0e-2
+class_steps = 50
 
 [training.optimizer]
 type = "adamw"

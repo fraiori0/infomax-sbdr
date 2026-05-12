@@ -16,9 +16,6 @@ max_freq_width = 2
 [training]
 epochs = 150
 batch_size = 256
-layer_idx = 1 # we train a single layer at a time, they are independent
-pred_horizon = 4 # how many steps head we train to predict (only the selected layer)
-exc_weight = 0.001 # weight for regularization pushing to increased pre-activation
 
 [training.checkpoint]
 save = true
@@ -31,10 +28,10 @@ shuffle = true
 # see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
 drop_last = true
 
-[training.loss.sim_fn]
-type = "log_and"
-[training.loss.sim_fn.kwargs]
-eps = 1.0e-1
+[training.loss]
+eps = 3.0e-2
+# w_eps = 1.0e-1
+class_steps = 30
 
 [training.optimizer]
 type = "adamw"

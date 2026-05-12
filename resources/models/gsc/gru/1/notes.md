@@ -1,2 +1,1 @@
-Implementing a custom critic $g(z,a) = \log \left( \langle z, a \rangle + \epsilon \right)$.
-When we consider a hard-threshold $z = (a > 0)$ the product $z^i a^i$ is simply a ReLU, and the gradient is well defined for the critic (sum of ReLUs for each component)..
+Implementing a sparse GRU-like block with XOR updates to the recurrent states.

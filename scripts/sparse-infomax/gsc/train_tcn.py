@@ -217,8 +217,16 @@ pprint(get_shapes(variables))
 
 print("\nForward pass jitted")
 
+def augment_input(xs, key):
+    # roll on the time axis by a random number of steps
+    # between 0 and N_FRAMES
+    MAX_STEPS = 5
+    n_steps = jax.random.randint(key, minval=-MAX_STEPS, maxval=MAX_STEPS, shape=())
+    return np.roll(xs, n_steps, -2)
+
 
 def forward(variables, xs, key):
+    xs = augment_input(xs, key)
     out = model.apply(
         variables,
         xs,
@@ -335,56 +343,46 @@ def encoder_infonce(a, eps=None):
     # Compute InfoNCE loss to separate activations across al samples
     p_ii = (a * a).sum(-1) + eps
     p_avg = (a * a_avg).sum(-1) + eps
-    per_sample_loss = -np.log(p_ii / p_avg).mean()
-    # Compute InfoNCE to separate average activity (in time) across sequences
-    a_time = a.mean(-2)
-    a_time_sum = a.sum(-2)
-    p_ii_time = (a_time_sum * a_time).sum(-1) + eps
-    p_avg_time = (a_time_sum * a_avg).sum(-1) + eps
-    time_loss = -np.log(p_ii_time / p_avg_time).mean()
-
-    loss_val = per_sample_loss + 0.05 * time_loss
+    loss_val = -np.log(p_ii / p_avg).mean()
 
     aux = {
-        "sample" : per_sample_loss,
-        "time" : time_loss,
+        "infonce" : loss_val,
     }
 
     return loss_val, aux
 
-def pred_infonce(z, labels):
-    eps = model_config["training"]["loss"]["eps"]
+def time_infonce(a, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
 
-    # process each label separately (this part should be parallelized, but we are not guaranteed to have 
-    # the same number of samples for each label, in every batch)
-    z_query = z[..., :-1, :]
-    z_neg = z.reshape((-1, z.shape[-1])).mean(0)
-    z_pos = z[..., 1:, :]
-    # Compute Predictive InfoNCE
-    p_ii = (z_query * z_pos).sum(-1) + eps
-    p_avg = (z_query * z_neg).sum(-1) + eps
-    pred_loss = -np.log(p_ii / p_avg).mean()
-    # Compute time-average InfoNCE
-    z_time = z.mean(-2)
-    p_ii_time = (z_time * z_time).sum(-1) + eps
-    p_avg_time = (z_time * z_neg).sum(-1) + eps
-    time_loss = -np.log(p_ii_time / p_avg_time).mean()
-
-    loss_val = pred_loss + 0.3 * time_loss
+    # Here we contrast the sequence of activation of different units
+    # such that units should be active at different times
+    a = np.swapaxes(a, -1, -2)
+    a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+    
+    # Compute InfoNCE loss to separate activations across al samples
+    p_ii = (a * a).sum(-1) + eps
+    p_avg = (a * a_avg).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_avg).mean()
 
     aux = {
-        "pred" : pred_loss,
-        "time" : time_loss,
+        "infonce" : loss_val,
     }
 
     return loss_val, aux
-
 
 def classification_loss(logits, labels):
-    # Average logits over time axis
-    logits = logits.mean(-2)
     # Compute one-hot labels
     labels_onehot = jax.nn.one_hot(labels, logits.shape[-1])
+    # Average logits over time axis
+    # # taking only n_last steps
+    # n_last = model_config["training"]["loss"]["class_steps"]
+    # logits = logits[..., -n_last:, :].sum(-2)
+    # Sum logits, such that the contribution of uninformative steps
+    # can be more easily reduced
+    logits = logits.sum(-2)
     # Compute categorical crossentropy loss
     loss = -(labels_onehot * jax.nn.log_softmax(logits)).sum(axis=-1)
     # compute accuracy
@@ -397,16 +395,17 @@ def classification_loss(logits, labels):
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
 outs, o_aux = forward(variables, xs, key)
-# weights need to be reshaped from the kernel-like shape for temporal convolutions
-w0 = variables["params"]["layers_0"]["conv"]["kernel"]
-w0 = w0.reshape((-1, w0.shape[-1]))
-z = outs[0]["z"]
 
-w_loss_val, w_aux = w_abs_infonce(w0)
-z_loss_val, z_aux = pred_infonce(z, labels)
+
+print("\nTesting loss function")
+for l_idx in range(len(outs)):
+    z = outs[l_idx]["z"]
+    e_loss_val, e_aux = encoder_infonce(z)
+    t_loss_val, t_aux = time_infonce(z)
+    print(f"\tLosses: layer {l_idx}: e: {e_loss_val}, t: {t_loss_val}")
+
 class_loss_val, class_aux = classification_loss(o_aux["logit"], labels)
-
-print(f"\tLosses: w: {w_loss_val}, z: {z_loss_val}, acc: {class_aux['acc']}")
+print(f"\tLosses: class: {class_loss_val} (accuracy: {class_aux['acc']})")
 
 
 """---------------------"""
@@ -527,13 +526,13 @@ def train_step(state, batch):
 
             # p_loss_val, p_aux = pred_infonce(z, labels)
             z_loss_val, z_aux = encoder_infonce(z)
-            p_loss_val, p_aux = encoder_infonce(p, eps=1e-1)
+            t_loss_val, t_aux = time_infonce(z)
             # w_loss_val, w_aux = w_abs_infonce(w)
 
             layer_loss_val = (
                 # 0.1 * w_loss_val
                 + z_loss_val
-                + p_loss_val
+                + 0*t_loss_val
             )
 
             loss_val = loss_val + layer_loss_val
@@ -543,8 +542,8 @@ def train_step(state, batch):
                 metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
             # for k, v in w_aux.items():
             #     metrics.update({f"aux_losses_{l_idx}/w_{k}": v})
-            for k, v in p_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/p_{k}": v})
+            for k, v in t_aux.items():
+                metrics.update({f"aux_losses_{l_idx}/t_{k}": v})
             
             # # Train only first layer
             # break
@@ -554,7 +553,7 @@ def train_step(state, batch):
         logits = o_aux["logit"]
         class_loss_val, class_aux = classification_loss(logits, labels)
         # Update loss_val
-        loss_val = loss_val + 2*class_loss_val
+        loss_val = loss_val + 3*class_loss_val
 
         # Update metrics with classification
         metrics.update({"class/loss": class_loss_val})
@@ -614,13 +613,13 @@ def eval_step(state, batch):
 
             # p_loss_val, p_aux = pred_infonce(z, labels)
             z_loss_val, z_aux = encoder_infonce(z)
-            p_loss_val, p_aux = encoder_infonce(p, eps=1e-1)
+            t_loss_val, t_aux = time_infonce(z)
             # w_loss_val, w_aux = w_abs_infonce(w)
 
             layer_loss_val = (
                 # 0.1 * w_loss_val
                 + z_loss_val
-                + p_loss_val
+                + t_loss_val
             )
 
             loss_val = loss_val + layer_loss_val
@@ -630,15 +629,19 @@ def eval_step(state, batch):
                 metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
             # for k, v in w_aux.items():
             #     metrics.update({f"aux_losses_{l_idx}/w_{k}": v})
-            for k, v in p_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/p_{k}": v})
+            for k, v in t_aux.items():
+                metrics.update({f"aux_losses_{l_idx}/t_{k}": v})
+            
+            # # Train only first layer
+            # break
 
-        # Compute classification loss
+        # # # Compute classification loss
         labels = batch["labels"]
         logits = o_aux["logit"]
         class_loss_val, class_aux = classification_loss(logits, labels)
         # Update loss_val
-        loss_val = loss_val + class_loss_val
+        loss_val = loss_val + 2*class_loss_val
+
         # Update metrics with classification
         metrics.update({"class/loss": class_loss_val})
         for k, v in class_aux.items():

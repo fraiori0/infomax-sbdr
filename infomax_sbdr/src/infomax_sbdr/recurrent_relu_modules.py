@@ -373,10 +373,12 @@ class RecSTEClassifier(RecSTE):
 
         # compute logits
         logits = self.classifier(self.gather_input_classifier(outs))
-        for i in range(len(outs)):
-            outs[i]["logits"] = logits
+        
+        aux = {
+            "logit": logits,
+        }
 
-        return new_states, outs
+        return new_states, (outs, aux)
     
     def scan(self, states, x_seq):
 
@@ -393,12 +395,12 @@ class RecSTEClassifier(RecSTE):
 
         # compute logits
         logits = self.classifier(self.gather_input_classifier(outs))
-        # compute time-average 
-        # logits = np.mean(logits, axis=-2)
-        for i in range(len(outs)):
-            outs[i]["logits"] = logits
+        
+        aux = {
+            "logit": logits,
+        }
 
-        return outs
+        return outs, aux
 
 class SparseGRULayer(nn.Module):
     """
@@ -550,13 +552,15 @@ class SparseGRUClassifier(SparseGRU):
     def __call__(self, states, x):
         new_states, outs = super().__call__(states, x)
         logits = self.classifier(self.gather_input_classifier(outs))
-        for i in range(len(outs)):
-            outs[i]["logits"] = logits
-        return new_states, outs
+        aux = {
+            "logit": logits,
+        }
+        return new_states, (outs, aux)
     
     def scan(self, states, x_seq):
         outs = super().scan(states, x_seq)
         logits = self.classifier(self.gather_input_classifier(outs))
-        for i in range(len(outs)):
-            outs[i]["logits"] = logits
-        return outs
+        aux = {
+            "logit": logits,
+        }
+        return outs, aux
