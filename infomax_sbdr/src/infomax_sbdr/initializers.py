@@ -95,3 +95,29 @@ def simplex(
     
     return init
 
+def time_conv_boolean_mask(
+    dtype = np.bool,
+):
+    """
+    Return an initializers that returns a boolean mask
+    where we randomly select only 1 non-zero value for each element on the axis dimension
+    """
+
+    def init(key,
+            shape,
+            axis=0,
+            dtype = dtype,
+            out_sharding = None):
+        
+        dtype = jax.dtypes.canonicalize_dtype(dtype)
+
+        idx_shape = shape[:axis] + shape[axis+1:]
+        idx = jax.random.randint(key, idx_shape, 0, shape[axis])
+        
+        # return a mask of given shape,
+        # setting True the values at (idx[i,j,...], i, j, ...)
+        mask = jax.nn.one_hot(idx, shape[axis], axis=axis).astype(dtype)
+        
+        return mask
+    
+    return init

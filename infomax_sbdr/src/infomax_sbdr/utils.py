@@ -4,6 +4,7 @@ import pickle
 import jax.numpy as np
 import orbax.checkpoint
 import jax
+from functools import partial
 
 
 # convolution operator over one specified axis, useful for time convolution with arbitrary batch dimensions
@@ -64,6 +65,12 @@ def threshold_softgradient(x):
     """ Threshold function with the gradient of a sigmoid"""
     zero = jax.nn.sigmoid(x) - jax.lax.stop_gradient(jax.nn.sigmoid(x))
     return zero + (x >= 0).astype(x.dtype)
+
+def threshold_softpp(x, a_min=0.0, a_max=1.0):
+    """ Threshold function with the gradient of a sigmoid"""
+    val_zero = jax.nn.sigmoid(x)
+    zero = val_zero - jax.lax.stop_gradient(val_zero)
+    return zero + a_max * (x >= 0).astype(x.dtype) + a_min * (x < 0).astype(x.dtype)
 
 def hard_threshold(x):
     return (x > 0).astype(x.dtype)
@@ -209,3 +216,91 @@ def make_grid_time_encoder(T_min, T_max, K, N):
         return code.reshape(t.shape + (K * N,))                   # (..., K*N)
 
     return periods_py, encode
+
+
+@partial(jax.jit, static_argnames=("n_labels",))
+def label_means(
+    activations: jax.Array,   # (*batch_dims, T, F)
+    labels:      jax.Array,   # (*batch_dims, T)  — integers in [0, n_labels)
+    n_labels:    int,
+) -> jax.Array:               # (n_labels, F)
+    """Mean activation per label, averaged over all batch dims and time."""
+    flat_acts = activations.reshape((-1, activations.shape[-1]))
+    flat_labels = labels.reshape((-1,))
+
+    sums   = jax.ops.segment_sum(flat_acts,                    flat_labels, n_labels)  # (n_labels, F)
+    counts = jax.ops.segment_sum(np.ones(flat_labels.shape), flat_labels, n_labels)  # (n_labels,)
+
+    return sums /(counts[:, None]+1e-6)   # (n_labels, F)
+
+
+# ── 2. leave-one-out means ────────────────────────────────────────────────────
+
+@partial(jax.jit, static_argnames=("n_labels",))
+def loo_label_means(
+    activations: jax.Array,   # (*batch_dims, T, F)
+    labels:      jax.Array,   # (*batch_dims, T)
+    n_labels:    int,
+) -> jax.Array:               # (n_labels, F)
+    """
+    For each label k, mean of every activation whose label is NOT k.
+
+    Uses the complement trick:
+        loo_sum[k]   = total_sum   - label_sum[k]
+        loo_count[k] = total_count - label_count[k]
+    so the cost is identical to computing plain per-label means.
+    """
+    flat_acts = activations.reshape((-1, activations.shape[-1]))
+    flat_labels = labels.reshape((-1,))
+
+    sums   = jax.ops.segment_sum(flat_acts,                    flat_labels, n_labels)  # (n_labels, F)
+    counts = jax.ops.segment_sum(np.ones(flat_labels.shape), flat_labels, n_labels)  # (n_labels,)
+
+    total_sum   = sums.sum(axis=0, keepdims=True)   # (1, F)   — broadcast over labels
+    total_count = counts.sum()                       # scalar
+
+    loo_sums   = total_sum   - sums              # (n_labels, F)
+    loo_counts = total_count - counts            # (n_labels,)
+
+    return loo_sums / (loo_counts[:, None] + 1e-6)        # (n_labels, F)
+
+
+@jax.custom_vjp
+def directional_clip(x, min_val=0.0, max_val=1.0):
+    # Forward pass: Standard clip
+    return np.clip(x, min_val, max_val)
+
+def directional_clip_fwd(x, min_val, max_val):
+    # The forward function returns the primal output 
+    # and the residuals needed for the backward pass
+    primal_out = directional_clip(x, min_val, max_val)
+    return primal_out, (x, min_val, max_val)
+
+def directional_clip_bwd(res, g):
+    x, min_val, max_val = res
+    
+    # In standard gradient descent, x = x - (lr * g).
+    # If g > 0, the optimizer will shrink x.
+    # If g < 0, the optimizer will grow x.
+
+    # Condition 1: Inside the boundary (pass gradient through)
+    in_bounds = (x >= min_val) & (x <= max_val)
+    
+    # Condition 2: Above boundary AND gradient pushes x down
+    pull_down = (x > max_val) & (g > 0)
+    
+    # Condition 3: Below boundary AND gradient pushes x up
+    pull_up = (x < min_val) & (g < 0)
+
+    # Combine conditions into a single mask
+    keep_grad_mask = in_bounds | pull_down | pull_up
+
+    # Apply the mask: pass upstream gradient 'g' if True, else 0.0
+    grad_x = np.where(keep_grad_mask, g, 0.0)
+
+    # Return gradients for all inputs (x, min_val, max_val). 
+    # We return None for the boundaries assuming they are static/non-trainable.
+    return (grad_x, None, None)
+
+# Bind the forward and backward passes to the custom operation
+directional_clip.defvjp(directional_clip_fwd, directional_clip_bwd)

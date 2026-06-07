@@ -89,9 +89,15 @@ config_rpl_module_dict = {
     "RecSTE" : rpl.RecSTE,
     "RecSTEClassifier": rpl.RecSTEClassifier,
     "SparseGRUClassifier": rpl.SparseGRUClassifier,
+    "CloneStructureClassifier": rpl.CloneStructureClassifier,
+    "TransformerStackClassifier": rpl.TransformerStackClassifier,
+    "CloneTestClassifier": rpl.CloneTestClassifier,
+    "LinearStableClassifier": rpl.LinearStableClassifier,
     "TCN": tcn.TCN,
     "TCNPoolClassifier": tcn.TCNPoolClassifier,
     "TCNPoolClassifierMulti": tcn.TCNPoolClassifierMulti,
+    "TCNOuterPoolClassifierMulti": tcn.TCNOuterPoolClassifierMulti,
+    "TCNDelayPoolClassifierMulti": tcn.TCNDelayPoolClassifierMulti,
     "CyclicOuterLayer": trhdc.CyclicOuterLayer,
 }
 

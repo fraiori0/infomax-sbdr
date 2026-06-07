@@ -1,0 +1,59 @@
+[model]
+type = "TCNOuterPoolClassifierMulti"
+seed = 46
+p_target = 0.01
+[model.kwargs]
+features = [32, 32]
+kernel_sizes = [5, 5]
+kernel_strides = [1, 1]
+pool_sizes = [3, 3]
+pool_strides = [3, 3]
+class_features = 35 # number of classes
+stop_grad = false
+   
+[dataset]
+[dataset.transform.specaugment.kwargs]
+n_time_masks = 2
+max_time_width = 5 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
+n_freq_masks = 2
+max_freq_width = 2
+
+[training]
+epochs = 200
+batch_size = 256
+num_classes = 35
+
+[training.checkpoint]
+save = true
+save_interval = 4 # epochs
+max_to_keep = 12
+
+[training.dataloader]
+shuffle = true
+# drop the last batch to avoid recompiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+
+[training.loss]
+eps = 1.0e0 #######
+w_eps = 1.0e-2
+class_steps = 50
+
+[training.optimizer]
+type = "adamw"
+[training.optimizer.kwargs]
+learning_rate = 0.001
+weight_decay = 0.00001
+
+[validation]
+split = 0.16
+eval_interval = 12
+[validation.dataloader]
+batch_size = 128
+[validation.sim_fn]
+type = "log_and"
+quantile = 0.9
+[validation.sim_fn.kwargs]
+eps = 1.0e-2
+
+

@@ -2,7 +2,7 @@ import os
 import argparse
 
 default_model = "tcn"
-default_number = "1multi"
+default_number = "1multik5"
 default_cuda = "1"
 
 # base folder
@@ -126,7 +126,7 @@ dataset_train = sbdr.GSCDataset(
     root        = data_folder,
     split       = "train",
     precompute  = True,
-    augment     = None,
+    augment     = transform, # None,
     max_samples = MAX_SAMPLES,
     cache_dir   = CACHE_DIR,
 )
@@ -226,7 +226,7 @@ def augment_input(xs, key):
 
 
 def forward(variables, xs, key):
-    xs = augment_input(xs, key)
+    # xs = augment_input(xs, key)
     out = model.apply(
         variables,
         xs,
@@ -282,6 +282,7 @@ pprint(get_shapes(aux))
 #     print(f"\tmax: {outs[0][k].max()}")
 #     print(f"\tmean: {outs[0][k].mean()}")
 #     print(f"\tstd: {outs[0][k].std()}")
+
 
 """---------------------"""
 """ Loss Function """
@@ -357,14 +358,15 @@ def time_infonce(a, eps=None):
     if eps is None:
         eps = model_config["training"]["loss"]["eps"]
 
-    # Here we contrast the sequence of activation of different units
-    # such that units should be active at different times
-    a = np.swapaxes(a, -1, -2)
+    # Match step -1, but contrast against step -2 
     a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+    a_neg = a[..., :-2, :].reshape((-1, a.shape[-1]))
+    a_pos = a[..., 1:-1, :].reshape((-1, a.shape[-1]))
+    a_anchor = a[..., 2:, :].reshape((-1, a.shape[-1]))
     
     # Compute InfoNCE loss to separate activations across al samples
-    p_ii = (a * a).sum(-1) + eps
-    p_avg = (a * a_avg).sum(-1) + eps
+    p_ii = (a_anchor * a_pos).sum(-1) + eps
+    p_avg = (0.5*(a_anchor * a_avg + a_anchor * a_neg)).sum(-1) + eps
     loss_val = -np.log(p_ii / p_avg).mean()
 
     aux = {
@@ -391,6 +393,61 @@ def classification_loss(logits, labels):
     }
     return loss.mean(), aux
 
+def cross_infonce(a1, a2, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # Compute average activation (for contrasting)
+    a1 = a1.reshape((-1, a1.shape[-1]))
+    a2 = a2.reshape((-1, a2.shape[-1]))
+    a_avg = np.concatenate((a1, a2), axis=0).mean(0)
+    
+    # Compute InfoNCE loss to separate activations across al samples
+    p_ii = (a1 * a2).sum(-1) + eps
+    p1_avg = (a1 * a_avg).sum(-1) + eps
+    p2_avg = (a2 * a_avg).sum(-1) + eps
+    loss1_val = -np.log(p_ii / p1_avg).mean()
+    loss2_val = -np.log(p_ii / p2_avg).mean()
+    loss_val = (loss1_val + loss2_val)
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+def loo_infonce(a, labels, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+    
+    # expand labels along time dimension and flatten
+    # NOTE: this should be done before flattening a
+    labels = labels[:, None].repeat(a.shape[-2], axis=-1).reshape((-1))
+    # flatten 
+    a = a.reshape((-1, a.shape[-1]))
+
+    a_loo_avg = sbdr.loo_label_means(
+        activations=a,
+        labels=labels,
+        n_labels=model_config["model"]["kwargs"]["class_features"],
+    ) # shape (n_labels, features)
+
+    # Compute InfoNCE loss to separate activations across al samples
+    p_ii = (a * a).sum(-1) + eps
+    p_loo_avg = (a * a_loo_avg[labels]).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_loo_avg).mean()
+
+    aux = {
+        "loo_infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+
 # test loss function
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
@@ -404,6 +461,7 @@ for l_idx in range(len(outs)):
     e_loss_val, e_aux = encoder_infonce(z)
     t_loss_val, t_aux = time_infonce(z)
     c_loss_val, c_aux = classification_loss(logit, labels)
+    loo_loss_val, loo_aux = loo_infonce(z, labels)
     print(f"\tLosses: layer {l_idx}: e: {e_loss_val}, t: {t_loss_val}, acc: {c_aux['acc']}")
 
 
@@ -500,10 +558,8 @@ def compute_metrics(outs):
 
 print("\nTraining and Evaluation Steps")
 
+def loss_fn_gen(state, batch):
 
-# @jit
-def train_step(state, batch):
-    
     def loss_fn(params):
         # Apply the model
         outs, auxs = forward(
@@ -524,17 +580,19 @@ def train_step(state, batch):
             logit = auxs[l_idx]["logit"]
             # w = params[f"layers_{l_idx}"]["conv"]["kernel"]
 
-            # p_loss_val, p_aux = pred_infonce(z, labels)
-            z_loss_val, z_aux = encoder_infonce(z)
-            t_loss_val, t_aux = time_infonce(z)
+            # p_loss_val, p_aux = encoder_infonce(p, eps=0.05)
+            # z_loss_val, z_aux = encoder_infonce(z)
+            # z_loss_val, z_aux = loo_infonce(z, batch["labels"])
+            z_loss_val, z_aux = time_infonce(z)
+
             c_loss_val, c_aux = classification_loss(logit, batch["labels"])
             # w_loss_val, w_aux = w_abs_infonce(w)
 
             layer_loss_val = (
                 # 0.1 * w_loss_val
-                + z_loss_val
-                + 0*t_loss_val
-                + c_loss_val
+                + 0*z_loss_val
+                + 3 * c_loss_val * max(l_idx-1, 0)
+                # + p_loss_val * 0.3
             )
 
             loss_val = loss_val + layer_loss_val
@@ -542,10 +600,6 @@ def train_step(state, batch):
             metrics.update({f"loss/{l_idx}": layer_loss_val})
             for k, v in z_aux.items():
                 metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
-            # for k, v in w_aux.items():
-            #     metrics.update({f"aux_losses_{l_idx}/w_{k}": v})
-            for k, v in t_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/t_{k}": v})
             
             # add classification loss
             metrics.update({f"loss/{l_idx}": layer_loss_val})
@@ -561,6 +615,13 @@ def train_step(state, batch):
         }
 
         return loss_val, (metrics, others)
+    
+    return loss_fn
+
+@jit
+def train_step(state, batch):
+    
+    loss_fn = loss_fn_gen(state, batch)
 
     # compute gradient, loss, and aux
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
@@ -585,63 +646,7 @@ def train_step(state, batch):
 @jit
 def eval_step(state, batch):
     
-    def loss_fn(params):
-        # Apply the model
-        outs, auxs = forward_eval(
-            {
-                "params": params,
-            },
-            batch["x_1"],
-            batch["key_1"],
-        )
-
-        # compute loss for each layer
-        loss_val = 0.0
-        metrics = compute_metrics(outs)
-        for l_idx in range(len(outs)):
-
-            z = outs[l_idx]["z"]
-            p = outs[l_idx]["p"]
-            logit = auxs[l_idx]["logit"]
-            # w = params[f"layers_{l_idx}"]["conv"]["kernel"]
-
-            # p_loss_val, p_aux = pred_infonce(z, labels)
-            z_loss_val, z_aux = encoder_infonce(z)
-            t_loss_val, t_aux = time_infonce(z)
-            c_loss_val, c_aux = classification_loss(logit, batch["labels"])
-            # w_loss_val, w_aux = w_abs_infonce(w)
-
-            layer_loss_val = (
-                # 0.1 * w_loss_val
-                + z_loss_val
-                + 0*t_loss_val
-                + c_loss_val
-            )
-
-            loss_val = loss_val + layer_loss_val
-
-            metrics.update({f"loss/{l_idx}": layer_loss_val})
-            for k, v in z_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
-            # for k, v in w_aux.items():
-            #     metrics.update({f"aux_losses_{l_idx}/w_{k}": v})
-            for k, v in t_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/t_{k}": v})
-            
-            # add classification loss
-            metrics.update({f"loss/{l_idx}": layer_loss_val})
-            # and accuracy
-            for k, v in c_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/class_{k}": v})
-
-        others = {
-            # BATCH_NORM - change here
-            # "mutable_updates": jax.tree.map(
-            #     lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
-            # ),
-        }
-
-        return loss_val, (metrics, others)
+    loss_fn = loss_fn_gen(state, batch)
 
     # compute loss
     loss_val, (metrics, others) = loss_fn(state["variables"]["params"])
@@ -722,10 +727,10 @@ def compute_activation_imgs(outs, params):
                 {f"activation_{l_idx}_{k}/{img_i}": img for img_i, img in enumerate(_v)}
             )
 
-        # Add encoder weights as images
-        w = params["layers_" + str(l_idx)]["conv"]["kernel"]
-        w = w.reshape((-1, w.shape[-1]))
-        img_dict[f"weights_{l_idx}"] = weights_to_img(w)
+        # # Add encoder weights as images
+        # w = params["layers_" + str(l_idx)]["conv"]["kernel"]
+        # w = w.reshape((-1, w.shape[-1]))
+        # img_dict[f"weights_{l_idx}"] = weights_to_img(w)
 
     return img_dict
 
