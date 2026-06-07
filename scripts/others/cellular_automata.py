@@ -29,16 +29,25 @@ N_S = (1,2,3,4)
 N_B = (5,)
 
 # neighborood kernel
+# K = np.array(
+#     (
+#         (1,1,1,1,1),
+#         (1,1,1,1,1),
+#         (1,1,0,1,1),
+#         (1,1,1,1,1),
+#         (1,1,1,1,1),
+#     )
+# )
 K = np.array(
-    ((1,1,1,1,1),
-    (1,1,1,1,1),
-    (1,1,0,1,1),
-    (1,1,1,1,1),
-    (1,1,1,1,1),)
+    (
+        (1,1,1),
+        (1,0,1),
+        (1,1,1),
+    )
 )
 
-HEIGHT = 480
-WIDTH = 480
+HEIGHT = 240
+WIDTH = 240
 
 """-------------------"""
 """ Utils """
@@ -59,15 +68,11 @@ def draw_input(key):
 
 @jit
 def step(state, z_in):
-    z_prev = state["z"]
-    # first apply input units (OR)
-    z = 1 - (1 - z_prev) * (1 - z_in)
-
+    z = state["z"]
     # pad borders like we are on a 2d torus, repeating values 
     # from the opposite side
     k_pad = K.shape[0] // 2
     z_pad = np.pad(z, ((k_pad,k_pad),(k_pad,k_pad)), mode="wrap")
-
     # Compute convolution with kernel
     z_count = jax.scipy.signal.convolve2d(
         z_pad,
@@ -77,12 +82,19 @@ def step(state, z_in):
 
     # # # Activate using cellular automata rule
     # Survival
-    z_survive = z_count <= 4
+    z_survive = (z_count >= 3)*(z_count <= 5)
+    # or with z_count=0 to keep existing alive cells alive
+    z_survive = 1.0 - (1-z_survive) * (1- (z_count == 0))
     # Birth
     z_birth = z_count == 5
     # Update
-    z = z_survive * z_prev + z_birth
+    z = z*z_survive + z_birth
+    z = np.clip(z, 0, 1)
     z = z.astype(np.float32)
+
+    # add input as an OR
+    # first apply input units (OR)
+    z = 1 - (1 - z) * (1 - z_in)
 
     new_state = {
         "z" : z,
@@ -136,7 +148,10 @@ for i in tqdm(range(N_STEPS)):
     key, _ = jax.random.split(key)
 
     # draw input
-    z_in = draw_input(key)
+    if i % 3 == 0:
+        z_in = draw_input(key)
+    else:
+        z_in = np.zeros((N,N), dtype=np.float32)
 
     # update state
     state, _ = step(state, z_in)
@@ -144,6 +159,15 @@ for i in tqdm(range(N_STEPS)):
     # collect state
     for k in state.keys():
         history[k].append(state[k])
+
+    # visualize
+    for k in state.keys():
+        img = state_to_img(state)[k]
+        cv2.imshow(k, img)
+    kp = cv2.waitKey(0)
+    if kp == ord("q"):
+        break
+
 
 # convert to numpy array
 for k in history.keys():
