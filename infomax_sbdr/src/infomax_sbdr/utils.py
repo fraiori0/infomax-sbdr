@@ -63,14 +63,17 @@ def sigmoid_ste(x):
 
 def threshold_softgradient(x):
     """ Threshold function with the gradient of a sigmoid"""
-    zero = jax.nn.sigmoid(x) - jax.lax.stop_gradient(jax.nn.sigmoid(x))
-    return zero + (x >= 0).astype(x.dtype)
+    val = jax.nn.sigmoid(x)
+    zero = val - jax.lax.stop_gradient(val)
+    actual_val = (x >= 0).astype(x.dtype)
+    return zero + actual_val
 
 def threshold_softpp(x, a_min=0.0, a_max=1.0):
     """ Threshold function with the gradient of a sigmoid"""
-    val_zero = jax.nn.sigmoid(x)
-    zero = val_zero - jax.lax.stop_gradient(val_zero)
-    return zero + a_max * (x >= 0).astype(x.dtype) + a_min * (x < 0).astype(x.dtype)
+    val = jax.nn.sigmoid(x)
+    zero = val - jax.lax.stop_gradient(val)
+    actual_val = a_max * (x >= 0).astype(x.dtype) + a_min * (x < 0).astype(x.dtype)
+    return zero + actual_val
 
 def hard_threshold(x):
     return (x > 0).astype(x.dtype)
@@ -304,3 +307,47 @@ def directional_clip_bwd(res, g):
 
 # Bind the forward and backward passes to the custom operation
 directional_clip.defvjp(directional_clip_fwd, directional_clip_bwd)
+
+
+@partial(jax.jit, static_argnames=['n', 'local_radius'])
+def generate_deterministic_small_world_mask(n: int, local_radius: int) -> jax.Array:
+    """
+    Generates a deterministic boolean mask for small-world connectivity 
+    using a Circulant Graph (Chordal Ring) approach.
+    
+    Args:
+        n: Dimension of the square matrix (number of neurons/nodes).
+        local_radius: Connects each node to `local_radius` neighbors on each side.
+                      (Provides high local clustering).
+        chords: A 1D jax.Array of specific long-range jump distances to add.
+                (Provides short global path lengths).
+        
+    Returns:
+        A boolean jax.numpy array of shape (n, n).
+    """
+    chords = np.array([
+        int(n ** 0.5), # Intermediate jump
+        n // 2         # Maximum distance jump
+    ])
+
+    # 1. Create periodic distance matrix for a 1D ring
+    i = np.arange(n)[:, None]
+    j = np.arange(n)[None, :]
+    dist = np.minimum(np.abs(i - j), n - np.abs(i - j))
+    
+    # 2. Local clustering mask
+    # Connect to nearest neighbors, excluding self-connections (dist == 0)
+    local_mask = (dist > 0) & (dist <= local_radius)
+    
+    # 3. Long-range shortcuts mask
+    # Reshape chords to broadcast against the (n, n) distance matrix
+    chords_expanded = np.asarray(chords)[:, None, None]
+    
+    # Check if the distance between any two nodes matches any of the chord lengths
+    # np.any checks across the chord dimension (axis=0)
+    long_range_mask = np.any(dist == chords_expanded, axis=0)
+    
+    # Combine local and long-range connections
+    final_mask = local_mask | long_range_mask
+    
+    return final_mask

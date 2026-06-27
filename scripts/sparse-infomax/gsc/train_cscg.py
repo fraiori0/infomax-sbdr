@@ -205,9 +205,9 @@ x_seq, labels = next(iter(dataloader_train))
 # Generate key
 key = jax.random.key(model_config["model"]["seed"])
 # Generate random initial state
-s0 = model.init_state_from_input(key, x_seq[..., 0, :])
+s0 = model.init_state_from_input(key, x_seq) # x_seq[..., 0, :])
 # Init params
-variables = model.init(key, s0, x_seq[..., 0, :])
+variables = model.init(key, s0, x_seq) # x_seq[..., 0, :])
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
 
@@ -215,7 +215,7 @@ pprint(get_shapes(variables))
 
 o, aux = model.apply(
     variables,
-    s0,
+    model.init_state_from_input(key, x_seq[..., 0, :]),
     x_seq,
     method=model.scan,
 )
@@ -307,7 +307,8 @@ def w_abs_infonce(w):
     w_loss = -np.log(p_ii / p_avg).mean()
 
     aux = {
-        "norm" : np.linalg.norm(w, axis=-1).mean()
+        "norm" : np.linalg.norm(w, axis=-1).mean(),
+        "infonce" : w_loss,
     }
 
     return w_loss, aux
@@ -354,16 +355,17 @@ def time_infonce(a, eps=None):
 
     return loss_val, aux
 
-def classification_loss(logits, labels):
+def classification_loss(logits, labels, gates=None):
+    
+    # Average logits over time axis weighting by the gates
+    # so uninformative steps can learn to not contribute
+    if gates is None:
+        logits = logits.mean(-2)
+    else:
+        logits = (logits * gates).sum(-2) / (gates.sum(-2) + 1e-6)
+
     # Compute one-hot labels
     labels_onehot = jax.nn.one_hot(labels, logits.shape[-1])
-    # Average logits over time axis
-    # # taking only n_last steps
-    n_last = model_config["training"]["loss"]["class_steps"]
-    logits = logits[..., -n_last:, :]
-    # Sum logits, such that the contribution of uninformative steps
-    # can be more easily reduced
-    logits = logits.sum(-2)
     # Compute categorical crossentropy loss
     loss = -(labels_onehot * jax.nn.log_softmax(logits)).sum(axis=-1)
     # compute accuracy
@@ -378,8 +380,9 @@ def cross_infonce(y_1, y_2):
     y_2_avg = y_2.reshape((-1, y_2.shape[-1])).mean(0)
 
     p_ii = (y_1 * y_2).sum(-1) + model_config["training"]["loss"]["eps"]
-    p_avg = 0.5*(y_1 * y_1_avg + y_2 * y_2_avg).sum(-1) + model_config["training"]["loss"]["eps"]
-    loss_val = -np.log(p_ii / p_avg).mean()
+    p_avg_1 = (y_1 * y_1_avg).sum(-1) + model_config["training"]["loss"]["eps"]
+    p_avg_2 = (y_2 * y_2_avg).sum(-1) + model_config["training"]["loss"]["eps"]
+    loss_val = -(np.log(p_ii / p_avg_1) + np.log(p_ii / p_avg_2)).mean()
 
     aux = {
         "infonce" : loss_val,
@@ -387,7 +390,7 @@ def cross_infonce(y_1, y_2):
 
     return loss_val, aux
 
-def windowed_infonce(z, window_length, eps=None):
+def window_avg_infonce(z, window_length, eps=None):
     if eps is None:
         eps = window_length * model_config["training"]["loss"]["eps"]
 
@@ -402,7 +405,26 @@ def windowed_infonce(z, window_length, eps=None):
     z_loss = -np.log(p_ii / p_avg).mean()
 
     aux = {
-        "norm" : np.linalg.norm(z, axis=-1).mean()
+        "infonce" : z_loss
+    }
+
+    return z_loss, aux
+
+def window_contr_infonce(z, window_length, eps=None):
+    if eps is None:
+        eps = window_length * model_config["training"]["loss"]["eps"]
+
+    # compute avg over the sliding window on the time axis
+    w = np.ones(window_length)/window_length
+    z_avg_window = sbdr.conv1d(z, w, axis=-2, mode="same")
+
+    # Compute InfoNCE loss
+    p_ii = (z*z).sum(-1) + eps
+    p_avg = (z*z_avg_window).sum(-1) + eps
+    z_loss = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : z_loss
     }
 
     return z_loss, aux
@@ -432,6 +454,46 @@ def loo_infonce(a, labels, eps=None):
 
     aux = {
         "loo_infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+def slow_infonce(a, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # compute average activation (for contrasting)
+    a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+    
+    # compute InfoNCE loss, positive is next step
+    p_ii = (a[..., :-1, :] * a[..., 1:, :]).sum(-1) + eps
+    p_avg = (a[..., :-1, :] * a_avg).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+def fast_infonce(a, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # compute average activation (for contrasting)
+    a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+    
+    # compute InfoNCE loss, positive is self, negative is next
+    p_ii = (a[..., :-1, :] * a[..., :-1, :]).sum(-1) + eps
+    p_avg = (a[..., :-1, :] * 0.5 * (a[..., 1:, :] + a_avg)).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : loss_val,
     }
 
     return loss_val, aux
@@ -520,7 +582,7 @@ def compute_metrics(outs):
     metrics = {}
 
     for l_idx, l_out in enumerate(outs):
-        for k in ["z", "z_f", "z_l"]:
+        for k in ["z", "s"]:
             
             # per-unit average
             unit_avg = np.mean(l_out[k].reshape((-1, l_out[k].shape[-1])), axis=0)
@@ -565,33 +627,48 @@ def loss_fn_gen(state, batch):
         for l_idx in range(len(outs)):
 
             z = outs[l_idx]["z"]
-            z_f = outs[l_idx]["z_f"]
-            z_l = outs[l_idx]["z_l"]
-            y = outs[l_idx]["y"]
-
-            z_loss_val, z_aux = loo_infonce(z, batch["labels"]) # encoder_infonce(z)
-            p_loss_val, p_aux = cross_infonce(z_f, y)
+            z_full = outs[l_idx]["z_full"]
+            # # Get weights
+            # wf = jax.nn.sigmoid(params[f"layers_{l_idx}"]["Wf"] - 2.0)
+            # wl = jax.nn.sigmoid(params[f"layers_{l_idx}"]["Wl"] - 2.0)
+            
+            z_loss_val, z_aux = encoder_infonce(z_full)
+            # z_loss_val, z_aux = loo_infonce(z, batch["labels"])
+            # s_loss_val, s_aux = loo_infonce(s, batch["labels"], eps=1e-2)
+            # zx_loss_val, zx_aux = loo_infonce(zx, batch["labels"], eps=1e-1)
+            # z_fl_loss_val, z_fl_aux = cross_infonce(z_f, z_l)
+            # wf_loss_val, wf_aux = w_abs_infonce(wf)
+            # wl_loss_val, wl_aux = w_abs_infonce(wl)
+            # z_fast_loss_val, z_fast_aux = fast_infonce(z_fast)
+            # z_slow_loss_val, z_slow_aux = slow_infonce(z_slow)
+            # s_loss_val, s_aux = loo_infonce(s, batch["labels"])
+            # z_k5_loss_val, z_k5_aux = window_contr_infonce(z, window_length=5)
+            # z_k11_loss_val, z_k11_aux = window_contr_infonce(z, window_length=11)
+            # z_k17_loss_val, z_k17_aux = window_contr_infonce(z, window_length=17)
 
             layer_loss_val = (
-                + 0.1*z_loss_val
-                + p_loss_val
+                + z_loss_val
+                # + 2 * z_fl_loss_val
+                # + z_k5_loss_val
+                # + z_k11_loss_val
+                # + z_k17_loss_val
+                # + zx_loss_val
+                # + p_loss_val
+                # + 0.1 * wf_loss_val
+                # + 0.1 * wl_loss_val
             )
 
             loss_val = loss_val + layer_loss_val
 
             metrics.update({f"loss/{l_idx}": layer_loss_val})
             for k, v in z_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
-            for k, v in p_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/p_{k}": v})
-            # for k, v in loo_aux.items():
-            #     metrics.update({f"aux_losses_{l_idx}/loo_{k}": v})
-            
+                metrics.update({f"aux_losses_{l_idx}/z_{k}": v})            
 
         # # # Compute classification loss
         labels = batch["labels"]
         logits = o_aux["logit"]
-        class_loss_val, class_aux = classification_loss(logits, labels)
+        # gates = o_aux["gate"]
+        class_loss_val, class_aux = classification_loss(logits, labels) #, gates=gates)
         # Update loss_val
         loss_val = loss_val + 2*class_loss_val
 
@@ -708,7 +785,7 @@ def compute_activation_imgs(outs, params):
 
     for l_idx, l_out in enumerate(outs):
         # # binary activations
-        for k in ["z_f", "z_l", "z"]:
+        for k in ["z", "z_full"]:
             
             # select only a few outputs (e.g., 8) from the batch size
             _v = l_out[k][:N_MAX]
@@ -719,18 +796,32 @@ def compute_activation_imgs(outs, params):
             img_dict.update(
                 {f"activation_{l_idx}_{k}/{img_i}": img for img_i, img in enumerate(_v)}
             )
-        # compute also a diff image between z_f and z_l
-        # in color, blue if positive, red if negative
-        _v = (l_out["z_f"] - l_out["y"])[:N_MAX]
-        _v = _v.reshape((*_v.shape, 1))
-        # color
-        blue = np.where(_v > 0.0, np.abs(_v), 0.0)
-        red = np.where(_v < 0.0, np.abs(_v), 0.0)
-        green = np.zeros_like(red)
-        _v = np.concatenate([red, green, blue], axis=-1)
-        img_dict.update(
-            {f"activation_{l_idx}_diff/{img_i}": img for img_i, img in enumerate(_v)}
-        )
+        # # compute also a diff image between z_f and z_l
+        # # in color, blue if positive, red if negative
+        # _v = (l_out["z_f"] - l_out["y"])[:N_MAX]
+        # _v = _v.reshape((*_v.shape, 1))
+        # # color
+        # blue = np.where(_v > 0.0, np.abs(_v), 0.0)
+        # red = np.where(_v < 0.0, np.abs(_v), 0.0)
+        # green = np.zeros_like(red)
+        # _v = np.concatenate([red, green, blue], axis=-1)
+        # img_dict.update(
+        #     {f"activation_{l_idx}_diff/{img_i}": img for img_i, img in enumerate(_v)}
+        # )
+        # Compute image of weights
+        # wf = jax.nn.sigmoid(params[f"layers_{l_idx}"]["Wf"])
+        # wl = jax.nn.sigmoid(params[f"layers_{l_idx}"]["Wl"])
+        # # v = jax.nn.sigmoid(3*params[f"layers_{l_idx}"]["V"])
+        # wf = wf.reshape((*wf.shape, 1))
+        # wl = wl.reshape((*wl.shape, 1))
+        # v = v.reshape((*v.shape, 1))
+        # img_dict.update(
+        #     {
+        #         f"weights_{l_idx}/wf": wf,
+        #         f"weights_{l_idx}/wl": wl,
+        #         f"weights_{l_idx}/v": v,
+        #     }
+        # )
 
     return img_dict
 

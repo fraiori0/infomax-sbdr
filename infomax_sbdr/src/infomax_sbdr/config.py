@@ -93,11 +93,16 @@ config_rpl_module_dict = {
     "TransformerStackClassifier": rpl.TransformerStackClassifier,
     "CloneTestClassifier": rpl.CloneTestClassifier,
     "LinearStableClassifier": rpl.LinearStableClassifier,
+    "FilterStackClassifier": rpl.FilterStackClassifier,
+    "GateEncoder": rpl.GateEncoder,
     "TCN": tcn.TCN,
     "TCNPoolClassifier": tcn.TCNPoolClassifier,
     "TCNPoolClassifierMulti": tcn.TCNPoolClassifierMulti,
     "TCNOuterPoolClassifierMulti": tcn.TCNOuterPoolClassifierMulti,
     "TCNDelayPoolClassifierMulti": tcn.TCNDelayPoolClassifierMulti,
+    "DelayStreamClassifier": tcn.DelayStreamClassifier,
+    "TCNDelayClassifier": tcn.TCNDelayClassifier,
+    "DepthwiseTCN": tcn.DepthwiseTCN,
     "CyclicOuterLayer": trhdc.CyclicOuterLayer,
 }
 

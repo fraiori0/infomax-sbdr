@@ -1,16 +1,18 @@
 [model]
-type = "CloneTestClassifier"
+type = "DepthwiseTCN"
 seed = 45
+p_target = 0.01
 [model.kwargs]
-in_features = [256]
-features = [128]
-clones = [6]
-stop_grad = false
-out_labels = 35
-class_kernel_size = 50
-class_kernel_stride = 9
+in_features = 40
+features = [512, 512]
+kernel_sizes = [3, 3]
+kernel_strides = [1, 1]
+pool_sizes = [3, 3]
+pool_strides = [2, 2]
+activation_fn = "tanh"
    
 [dataset]
+n_labels = 35
 [dataset.transform.specaugment.kwargs]
 n_time_masks = 2
 max_time_width = 5 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
@@ -18,8 +20,9 @@ n_freq_masks = 2
 max_freq_width = 2
 
 [training]
-epochs = 150
+epochs = 60
 batch_size = 256
+num_classes = 35
 
 [training.checkpoint]
 save = true
@@ -33,21 +36,20 @@ shuffle = true
 drop_last = true
 
 [training.loss]
-eps = 3.0e-2
-w_eps = 1.0e-1
-class_steps = 60
+eps = 1.0
+w_eps = 1.0e-2
 
 [training.optimizer]
 type = "adamw"
 [training.optimizer.kwargs]
-learning_rate = 0.001
-weight_decay = 0.00001
+learning_rate = 0.01
+weight_decay = 0.001
 
 [validation]
 split = 0.16
 eval_interval = 12
 [validation.dataloader]
-batch_size = 372
+batch_size = 256
 [validation.sim_fn]
 type = "log_and"
 quantile = 0.9

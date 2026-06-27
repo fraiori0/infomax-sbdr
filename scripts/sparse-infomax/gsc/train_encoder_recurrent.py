@@ -1,8 +1,8 @@
 import os
 import argparse
 
-default_model = "tcn"
-default_number = "4pool_bigk"
+default_model = "rec"
+default_number = "1"
 default_cuda = "1"
 
 # base folder
@@ -126,7 +126,7 @@ dataset_train = sbdr.GSCDataset(
     root        = data_folder,
     split       = "train",
     precompute  = True,
-    augment     = None,
+    augment     = transform,
     max_samples = MAX_SAMPLES,
     cache_dir   = CACHE_DIR,
 )
@@ -204,12 +204,21 @@ model_eval = model_class(
 x_seq, labels = next(iter(dataloader_train))
 # Generate key
 key = jax.random.key(model_config["model"]["seed"])
+# Generate random initial state
+s0 = model.init_state_from_input(key, x_seq[..., 0, :])
 # Init params
-variables = model.init(key, x_seq)
+variables = model.init(key, s0, x_seq[..., 0, :])
 
 print(f"\tDict of variables: \n\t{variables.keys()}")
 
 pprint(get_shapes(variables))
+
+o, aux = model.apply(
+    variables,
+    model.init_state_from_input(key, x_seq[..., 0, :]),
+    x_seq,
+    method=model.scan,
+)
 
 """---------------------"""
 """ Forward Pass """
@@ -217,27 +226,38 @@ pprint(get_shapes(variables))
 
 print("\nForward pass jitted")
 
-def augment_input(xs, key):
-    # roll on the time axis by a random number of steps
-    # between 0 and N_FRAMES
-    MAX_STEPS = 5
-    n_steps = jax.random.randint(key, minval=-MAX_STEPS, maxval=MAX_STEPS, shape=())
-    return np.roll(xs, n_steps, -2)
+# def augment_input(xs, key):
+#     # roll on the time axis by a random number of steps
+#     # between 0 and N_FRAMES
+#     MAX_STEPS = 5
+#     n_steps = jax.random.randint(key, minval=-MAX_STEPS, maxval=MAX_STEPS, shape=())
+#     return np.roll(xs, n_steps, -2)
 
 
 def forward(variables, xs, key):
-    xs = augment_input(xs, key)
+    # Here we assume an input sequence, not a single step
+    # i.e., second-to-last axis is time
+    # generate initial state
+    s0 = model.init_state_from_input(key, xs[..., 0, :])
     out = model.apply(
         variables,
+        s0,
         xs,
+        method=model.scan,
     )
     return out
 
 
 def forward_eval(variables, xs, key):
+    # Here we assume an input sequence, not a single step
+    # i.e., second-to-last axis is time
+    # generate initial state
+    s0 = model_eval.init_state_from_input(key, xs[..., 0, :])
     out = model_eval.apply(
         variables,
+        s0,
         xs,
+        method=model_eval.scan,
     )
     return out
 
@@ -263,50 +283,10 @@ pprint(get_shapes(outs))
 print(f"\tAux shapes:")
 pprint(get_shapes(aux))
 
-# BATCH_NORM - change here
-# print(f"\tMutable updates:")
-# pprint(get_shapes(mutable_updates))
-
-# print(f"\nTest one epoch:")
-# # test time for one epoch
-# t0 = time()
-# for (xs_1, xs_2), labels in tqdm(dataloader_train):
-#     key, _ = jax.random.split(key)
-#     forward_jitted(variables, xs_1, key)
-
-# print(f"\tTime for one epoch: {time() - t0}")
-
-# for k in outs[0].keys():
-#     print(f"\n{k}")
-#     print(f"\tmin: {outs[0][k].min()}")
-#     print(f"\tmax: {outs[0][k].max()}")
-#     print(f"\tmean: {outs[0][k].mean()}")
-#     print(f"\tstd: {outs[0][k].std()}")
 
 """---------------------"""
 """ Loss Function """
 """---------------------"""
-
-def w_infonce(w):
-    # Compute an InfoNCE loss with custom critic, given a weight matrix 
-    # the weight matrix is assumed to be of shape (in_features, out_features)
-    # and InfoNCE is computed to separate weights across units
-
-    eps = model_config["training"]["loss"]["w_eps"]
-
-    w = w.T # reshape to (out_features, in_features)
-    w_avg = w.mean(0)
-
-    p_ii = (w*w).sum(-1) + eps
-    p_avg = (w*w_avg).sum(-1) + eps
-    w_loss = -np.log(p_ii / p_avg).mean()
-
-    aux = {
-        "norm" : np.linalg.norm(w, axis=-1).mean()
-    }
-
-    return w_loss, aux
-
 
 def w_abs_infonce(w):
 
@@ -326,7 +306,8 @@ def w_abs_infonce(w):
     w_loss = -np.log(p_ii / p_avg).mean()
 
     aux = {
-        "norm" : np.linalg.norm(w, axis=-1).mean()
+        "norm" : np.linalg.norm(w, axis=-1).mean(),
+        "infonce" : w_loss,
     }
 
     return w_loss, aux
@@ -373,16 +354,17 @@ def time_infonce(a, eps=None):
 
     return loss_val, aux
 
-def classification_loss(logits, labels):
+def classification_loss(logits, labels, gates=None):
+    
+    # Average logits over time axis weighting by the gates
+    # so uninformative steps can learn to not contribute
+    if gates is None:
+        logits = logits.mean(-2)
+    else:
+        logits = (logits * gates).sum(-2) / (gates.sum(-2) + 1e-6)
+
     # Compute one-hot labels
     labels_onehot = jax.nn.one_hot(labels, logits.shape[-1])
-    # Average logits over time axis
-    # # taking only n_last steps
-    # n_last = model_config["training"]["loss"]["class_steps"]
-    # logits = logits[..., -n_last:, :].sum(-2)
-    # Sum logits, such that the contribution of uninformative steps
-    # can be more easily reduced
-    logits = logits.mean(-2)
     # Compute categorical crossentropy loss
     loss = -(labels_onehot * jax.nn.log_softmax(logits)).sum(axis=-1)
     # compute accuracy
@@ -391,6 +373,168 @@ def classification_loss(logits, labels):
     }
     return loss.mean(), aux
 
+def cross_infonce(y_1, y_2, eps=None):
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # compute InfoNCE between two encodings
+    y_1_avg = y_1.reshape((-1, y_1.shape[-1])).mean(0)
+    y_2_avg = y_2.reshape((-1, y_2.shape[-1])).mean(0)
+
+    p_ii = (y_1 * y_2).sum(-1) + eps
+    p_avg_1 = (y_1 * y_1_avg).sum(-1) + eps
+    p_avg_2 = (y_2 * y_2_avg).sum(-1) + eps
+    loss_val = -0.5 * (np.log(p_ii / p_avg_1) + np.log(p_ii / p_avg_2)).mean()
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+def window_avg_infonce(z, window_length, eps=None):
+    if eps is None:
+        eps = window_length * model_config["training"]["loss"]["eps"]
+
+    # compute sums over the sliding window on the time axis
+    w = np.ones(window_length)
+    z = sbdr.conv1d(z, w, axis=-2, mode="valid")
+    z_avg = z.reshape((-1, z.shape[-1])).mean(0)
+
+    # Compute InfoNCE loss
+    p_ii = (z*z).sum(-1) + eps
+    p_avg = (z*z_avg).sum(-1) + eps
+    z_loss = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : z_loss
+    }
+
+    return z_loss, aux
+
+def window_contr_infonce(z, window_length, eps=None):
+    if eps is None:
+        eps = window_length * model_config["training"]["loss"]["eps"]
+
+    # compute avg over the sliding window on the time axis
+    w = np.ones(window_length)/window_length
+    z_avg_window = sbdr.conv1d(z, w, axis=-2, mode="same")
+
+    # Compute InfoNCE loss
+    p_ii = (z*z).sum(-1) + eps
+    p_avg = (z*z_avg_window).sum(-1) + eps
+    z_loss = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : z_loss
+    }
+
+    return z_loss, aux
+
+def loo_infonce(a, labels, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+    
+    # expand labels along time dimension and flatten
+    # NOTE: this should be done before flattening a
+    labels = labels[:, None].repeat(a.shape[-2], axis=-1).reshape((-1))
+    # flatten 
+    a = a.reshape((-1, a.shape[-1]))
+
+    a_loo_avg = sbdr.loo_label_means(
+        activations=a,
+        labels=labels,
+        n_labels=model_config["training"]["loss"]["n_classes"],
+    ) # shape (n_labels, features)
+
+    # Compute InfoNCE loss to separate activations across al samples
+    p_ii = (a * a).sum(-1) + eps
+    p_loo_avg = (a * a_loo_avg[labels]).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_loo_avg).mean()
+
+    aux = {
+        "loo_infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+def cross_loo_infonce(a_1, a_2, labels, eps=None):
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # expand labels along time dimension and flatten
+    # NOTE: this should be done before flattening a
+    labels = labels[:, None].repeat(a_2.shape[-2], axis=-1).reshape((-1))
+    # flatten 
+    a_1 = a_1.reshape((-1, a_1.shape[-1]))
+    a_2 = a_2.reshape((-1, a_2.shape[-1]))
+
+    a_1_loo_avg = sbdr.loo_label_means(
+        activations=a_1,
+        labels=labels,
+        n_labels=model_config["training"]["loss"]["n_classes"],
+    )
+    a_2_loo_avg = sbdr.loo_label_means(
+        activations=a_2,
+        labels=labels,
+        n_labels=model_config["training"]["loss"]["n_classes"],
+    )
+
+    p_ii = (a_1 * a_2).sum(-1) + eps
+    p_avg_1 = (a_1 * a_1_loo_avg[labels]).sum(-1) + eps
+    p_avg_2 = (a_2 * a_2_loo_avg[labels]).sum(-1) + eps
+    loss_val = -0.5 * (np.log(p_ii / p_avg_1) + np.log(p_ii / p_avg_2)).mean()
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+
+def slow_infonce(a, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # compute average activation (for contrasting)
+    a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+    
+    # compute InfoNCE loss, positive is next step
+    p_ii = (a[..., :-1, :] * a[..., 1:, :]).sum(-1) + eps
+    p_avg = (a[..., :-1, :] * a_avg).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+def fast_infonce(a, eps=None):
+    # given a vector of non-negative values
+    # and shape (*batch_dims, time, features)
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # compute average activation (for contrasting)
+    a_avg = a.reshape((-1, a.shape[-1])).mean(0)
+    
+    # compute InfoNCE loss, positive is self, negative is next
+    p_ii = (a[..., :-1, :] * a[..., :-1, :]).sum(-1) + eps
+    p_avg = (a[..., :-1, :] * 0.5 * (a[..., 1:, :] + a_avg)).sum(-1) + eps
+    loss_val = -np.log(p_ii / p_avg).mean()
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
+
 # test loss function
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
@@ -398,15 +542,14 @@ outs, o_aux = forward(variables, xs, key)
 
 
 print("\nTesting loss function")
-for l_idx in range(len(outs)):
-    z = outs[l_idx]["z"]
-    e_loss_val, e_aux = encoder_infonce(z)
-    t_loss_val, t_aux = time_infonce(z)
-    print(f"\tLosses: layer {l_idx}: e: {e_loss_val}, t: {t_loss_val}")
+z = outs["z"]
+z_loss_val, z_aux = encoder_infonce(z)
+loo_loss_val, loo_aux = loo_infonce(z, labels)
+print(f"\tinfonce: {z_loss_val}")
+print(f"\tloo_infonce: {loo_loss_val}")
 
-class_loss_val, class_aux = classification_loss(o_aux["logit"], labels)
-print(f"\tLosses: class: {class_loss_val} (accuracy: {class_aux['acc']})")
-
+# class_loss_val, class_aux = classification_loss(o_aux["logit"], labels)
+# print(f"\tLosses: class: {class_loss_val} (accuracy: {class_aux['acc']})")
 
 """---------------------"""
 """ Checkpointing """
@@ -472,24 +615,23 @@ def compute_metrics(outs):
     """Compute metrics from model outputs."""
     metrics = {}
 
-    for l_idx, l_out in enumerate(outs):
-        for k in ["y", "z", "p"]:
-            
-            # per-unit average
-            unit_avg = np.mean(l_out[k].reshape((-1, l_out[k].shape[-1])), axis=0)
-            qs_unit_val = np.quantile(unit_avg, QS)
+    for k in ["z", "zf"]:
+        
+        # per-unit average
+        unit_avg = np.mean(outs[k].reshape((-1, outs[k].shape[-1])), axis=0)
+        qs_unit_val = np.quantile(unit_avg, QS)
 
-            # per-sample average
-            sample_avg = np.mean(l_out[k].reshape((-1, l_out[k].shape[-1])), axis=-1)
-            qs_sample_val = np.quantile(sample_avg, QS)
+        # per-sample average
+        sample_avg = np.mean(outs[k].reshape((-1, outs[k].shape[-1])), axis=-1)
+        qs_sample_val = np.quantile(sample_avg, QS)
 
 
-            metrics.update(
-                {f"unit_{l_idx}_{k}/{kk}": v for kk, v in zip(Q_KEYS, qs_unit_val)}
-            )
-            metrics.update(
-                {f"sample_{l_idx}_{k}/{kk}": v for kk, v in zip(Q_KEYS, qs_sample_val)}
-            )
+        metrics.update(
+            {f"unit_{k}/{kk}": v for kk, v in zip(Q_KEYS, qs_unit_val)}
+        )
+        metrics.update(
+            {f"sample_{k}/{kk}": v for kk, v in zip(Q_KEYS, qs_sample_val)}
+        )
 
     return metrics
 
@@ -501,10 +643,7 @@ def compute_metrics(outs):
 
 print("\nTraining and Evaluation Steps")
 
-
-# @jit
-def train_step(state, batch):
-    
+def loss_fn_gen(state, batch):
     def loss_fn(params):
         # Apply the model
         outs, o_aux = forward(
@@ -518,47 +657,48 @@ def train_step(state, batch):
         # compute loss for each layer
         loss_val = 0.0
         metrics = compute_metrics(outs)
-        for l_idx in range(len(outs)):
-
-            z = outs[l_idx]["z"]
-            p = outs[l_idx]["p"]
-            # w = params[f"layers_{l_idx}"]["conv"]["kernel"]
-
-            # p_loss_val, p_aux = pred_infonce(z, labels)
-            z_loss_val, z_aux = encoder_infonce(z)
-            t_loss_val, t_aux = time_infonce(z)
-            # w_loss_val, w_aux = w_abs_infonce(w)
-
-            layer_loss_val = (
-                # 0.1 * w_loss_val
-                + z_loss_val
-                + 0*t_loss_val
-            )
-
-            loss_val = loss_val + layer_loss_val
-
-            metrics.update({f"loss/{l_idx}": layer_loss_val})
-            for k, v in z_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
-            # for k, v in w_aux.items():
-            #     metrics.update({f"aux_losses_{l_idx}/w_{k}": v})
-            for k, v in t_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/t_{k}": v})
+        
+        z = outs["z"]
+        zf = outs["zf"]
             
-            # # Train only first layer
-            # break
+        # z_loss_val, z_aux = encoder_infonce(z)
+        # z_loss_val, z_aux = cross_loo_infonce(
+        #     z[..., :-1, :],
+        #     jax.lax.stop_gradient(a_neutral[..., 1:, :]), # JEPA style, s.g. on target
+        #     batch["labels"],
+        #     eps=3e-2,
+        # )
+        z_loss_val, z_aux = cross_infonce(z[..., :-1, :], jax.lax.stop_gradient(zf[..., 1:, :]))
+        zf_loss_val, zf_aux = encoder_infonce(zf)
+        # a_off_loss_val, a_off_aux = loo_infonce(a_off)
 
-        # # # Compute classification loss
-        labels = batch["labels"]
-        logits = o_aux["logit"]
-        class_loss_val, class_aux = classification_loss(logits, labels)
-        # Update loss_val
-        loss_val = loss_val + 3*class_loss_val
+        loss_val = (
+            + z_loss_val
+            + zf_loss_val
+            # + a_on_loss_val
+            # + a_off_loss_val
+        )
 
-        # Update metrics with classification
-        metrics.update({"class/loss": class_loss_val})
-        for k, v in class_aux.items():
-            metrics.update({"class/" + k: v})
+        metrics.update({f"loss": loss_val})
+        for k, v in z_aux.items():
+            metrics.update({f"aux_losses/z_{k}": v})
+        for k, v in zf_aux.items():
+            metrics.update({f"aux_losses/zf_{k}": v})
+        # for k, v in a_off_aux.items():
+        #     metrics.update({f"aux_losses/a_off_{k}": v})            
+
+        # # # # Compute classification loss
+        # labels = batch["labels"]
+        # logits = o_aux["logit"]
+        # # gates = o_aux["gate"]
+        # class_loss_val, class_aux = classification_loss(logits, labels) #, gates=gates)
+        # # Update loss_val
+        # loss_val = loss_val + 2*class_loss_val
+
+        # # Update metrics with classification
+        # metrics.update({"class/loss": class_loss_val})
+        # for k, v in class_aux.items():
+        #     metrics.update({"class/" + k: v})
 
         others = {
             # BATCH_NORM - change here
@@ -568,7 +708,14 @@ def train_step(state, batch):
         }
 
         return loss_val, (metrics, others)
+    
+    return loss_fn
 
+
+@jit
+def train_step(state, batch):
+    
+    loss_fn = loss_fn_gen(state, batch)
     # compute gradient, loss, and aux
     grad_fn = jax.value_and_grad(loss_fn, argnums=0, has_aux=True)
     (loss_val, (metrics, others)), grads = grad_fn(state["variables"]["params"])
@@ -592,70 +739,7 @@ def train_step(state, batch):
 @jit
 def eval_step(state, batch):
     
-    def loss_fn(params):
-        # Apply the model
-        outs, o_aux = forward_eval(
-            {
-                "params": params,
-            },
-            batch["x_1"],
-            batch["key_1"],
-        )
-
-        # compute loss for each layer
-        loss_val = 0.0
-        metrics = compute_metrics(outs)
-        for l_idx in range(len(outs)):
-
-            z = outs[l_idx]["z"]
-            p = outs[l_idx]["p"]
-            # w = params[f"layers_{l_idx}"]["conv"]["kernel"]
-
-            # p_loss_val, p_aux = pred_infonce(z, labels)
-            z_loss_val, z_aux = encoder_infonce(z)
-            t_loss_val, t_aux = time_infonce(z)
-            # w_loss_val, w_aux = w_abs_infonce(w)
-
-            layer_loss_val = (
-                # 0.1 * w_loss_val
-                + z_loss_val
-                + t_loss_val
-            )
-
-            loss_val = loss_val + layer_loss_val
-
-            metrics.update({f"loss/{l_idx}": layer_loss_val})
-            for k, v in z_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/z_{k}": v})
-            # for k, v in w_aux.items():
-            #     metrics.update({f"aux_losses_{l_idx}/w_{k}": v})
-            for k, v in t_aux.items():
-                metrics.update({f"aux_losses_{l_idx}/t_{k}": v})
-            
-            # # Train only first layer
-            # break
-
-        # # # Compute classification loss
-        labels = batch["labels"]
-        logits = o_aux["logit"]
-        class_loss_val, class_aux = classification_loss(logits, labels)
-        # Update loss_val
-        loss_val = loss_val + 2*class_loss_val
-
-        # Update metrics with classification
-        metrics.update({"class/loss": class_loss_val})
-        for k, v in class_aux.items():
-            metrics.update({"class/" + k: v})
-
-        # Used when considering batch norm mutables
-        others = {
-            # BATCH_NORM - change here
-            # "mutable_updates": jax.tree.map(
-            #     lambda x, y: (x + y) / 2.0, mutable_updates_1, mutable_updates_2
-            # ),
-        }
-
-        return loss_val, (metrics, others)
+    loss_fn = loss_fn_gen(state, batch)
 
     # compute loss
     loss_val, (metrics, others) = loss_fn(state["variables"]["params"])
@@ -699,7 +783,6 @@ pprint(gradients_are_zero)
 print(f"\tGradients are NAN:")
 pprint(gradients_are_nan)
 
-
 """------------------"""
 """ Logging Utils """
 """------------------"""
@@ -722,24 +805,30 @@ def compute_activation_imgs(outs, params):
 
     N_MAX = 8
 
-    for l_idx, l_out in enumerate(outs):
-        # # binary activations
-        for k in ["y", "z"]:
-            
-            # select only a few outputs (e.g., 8) from the batch size
-            _v = l_out[k][:N_MAX]
+    # # binary activations
+    for k in ["z", "zf"]:
+        
+        # select only a few outputs (e.g., 8) from the batch size
+        _v = outs[k][:N_MAX]
 
-            # add last channel (grayscale)
-            _v = _v.reshape((*_v.shape, 1))
+        # add last channel (grayscale)
+        _v = _v.reshape((*_v.shape, 1))
 
-            img_dict.update(
-                {f"activation_{l_idx}_{k}/{img_i}": img for img_i, img in enumerate(_v)}
-            )
+        img_dict.update(
+            {f"activation_{k}/{img_i}": img for img_i, img in enumerate(_v)}
+        )
+    # compute a colored diff image (red-blue for negative-positive)
+    # between z and a_neutral
+    _v_target = outs["zf"][:N_MAX][..., 1:, :]
+    _v_pred = outs["z"][:N_MAX][..., :-1, :]
+    _v_diff = _v_pred - _v_target
+    _v_neg = np.where(_v_diff < 0.0, np.abs(_v_diff), 0.0)
+    _v_pos = np.where(_v_diff > 0.0, np.abs(_v_diff), 0.0)
+    img_diff = np.stack([_v_neg, np.zeros_like(_v_neg), _v_pos], axis=-1)
+    img_dict.update(
+        {f"activation_z_a_neutral_diff/{img_i}": img for img_i, img in enumerate(img_diff)}
+    )
 
-        # Add encoder weights as images
-        w = params["layers_" + str(l_idx)]["conv"]["kernel"]
-        w = w.reshape((-1, w.shape[-1]))
-        img_dict[f"weights_{l_idx}"] = weights_to_img(w)
 
     return img_dict
 

@@ -7,6 +7,26 @@ from functools import partial
 import infomax_sbdr.binary_comparisons as bc
 import infomax_sbdr.utils as ut
 import infomax_sbdr.initializers as my_inits
+from infomax_sbdr.delay_modules import DelayedLinear
+import numpy as onp
+
+config_activation_dict = {
+    "relu": nn.relu,
+    "tanh": nn.tanh,
+    "sigmoid": nn.sigmoid,
+    "softmax": nn.softmax,
+    "elu": nn.elu,
+    "selu": nn.selu,
+    "gelu": nn.gelu,
+    "swish": nn.swish,
+    "leaky_relu": nn.leaky_relu,
+    "identity": lambda x: x,
+    "mish": jax.nn.mish,
+    "sigmoid_ste": ut.sigmoid_ste,
+    "threshold_softgradient": ut.threshold_softgradient,
+    "hard_threshold": ut.hard_threshold,
+
+}
 
 """ Custom pooling """
 
@@ -353,14 +373,14 @@ class TemporalConvPoolLayer(nn.Module):
         z = jax.nn.sigmoid(pre_activation)
         y = ut.threshold_softgradient(pre_activation)
 
-        # # Aggregate temporally using max_pool or avg_pool
-        # p = nn.max_pool(
-        #     z,
-        #     window_shape=(self.pool_size,),
-        #     strides=(self.pool_stride,),
-        #     padding="SAME",
-        # )
-        p=z
+        # Aggregate temporally using max_pool or avg_pool
+        p = nn.max_pool(
+            z,
+            window_shape=(self.pool_size,),
+            strides=(self.pool_stride,),
+            padding="SAME",
+        )
+        # p=z
         # # Alternative: a 1/t kernel
         # w_pool = 1.0/np.arange(1, self.pool_size+1)
         # # collapse batch dimensions
@@ -372,6 +392,212 @@ class TemporalConvPoolLayer(nn.Module):
             "p": p,
         }
         return outs
+    
+class TMaskedConvPoolLayer(nn.Module):
+    """Causal temporal convolutional layer.
+ 
+    Attributes:
+        features:      Number of output channels (kernel features).
+        kernel_size:   Length of the 1-D convolutional kernel (must be ≥ 1).
+        kernel_stride: Step size along the time axis (default 1).
+        pool_size:     Length of the 1-D pooling kernel (must be ≥ 1).
+        pool_stride:   Step size along the time axis (default 1).
+        use_bias:      Whether to add a learnable bias term.
+        kernel_init:   Initialiser for the convolutional kernel weights.
+        bias_init:     Initialiser for the bias vector.
+    """
+    
+    in_features: int
+    features: int
+    kernel_size: int
+    kernel_stride: int
+    pool_size: int
+    pool_stride: int
+    use_bias: bool = True
+ 
+    # ------------------------------------------------------------------
+    # setup — create sub-modules and validate hyper-parameters
+    # ------------------------------------------------------------------
+ 
+    def setup(self) -> None:
+        if self.kernel_size < 1:
+            raise ValueError(f"kernel_size must be ≥ 1, got {self.kernel_size}")
+        if self.kernel_stride < 1:
+            raise ValueError(f"stride must be ≥ 1, got {self.kernel_stride}")
+ 
+        # We initialize directly parameters
+        self.kernel = self.param(
+            "kernel",
+            nn.initializers.glorot_uniform(),
+            (self.kernel_size, self.in_features, self.features),
+        )
+        if self.use_bias:
+            self.bias = self.param(
+                "bias",
+                nn.initializers.zeros,
+                (self.features,),
+            )
+        else:
+            self.bias = None
+
+        # and also a mask, to in practice make convolutions
+        # into simple single delayed connections
+        self.mask = self.param(
+            "mask",
+            my_inits.time_conv_boolean_mask(),
+            (self.kernel_size, self.in_features, self.features),
+            axis=0, # axis with random masking
+            # need to be float for gradient, we will stop the gradient anyway
+            dtype=np.float32,
+        )
+ 
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """Apply causal temporal convolution.
+ 
+        Args:
+            x: Float array of shape ``(*batch_dims, time, features)``.
+               Any number of leading batch dimensions is supported.
+ 
+        Returns:
+            Float array of shape ``(*batch_dims, time_out, self.features)``
+            where ``time_out = ⌊(time − 1) / stride⌋ + 1``.
+        """
+        # 1. Causal padding
+        # Prepend (kernel_size − 1) zero frames so each output step only
+        # sees the present and past inputs, never future ones.
+        #
+        # np.pad expects a sequence of (before, after) pairs, one per axis.
+        # Layout: [...batch axes..., time axis, feature axis]
+        pad_size = self.kernel_size - 1
+        if pad_size > 0:
+            pad_width = [(0, 0)] * (x.ndim - 2) + [(pad_size, 0), (0, 0)]
+            x = np.pad(x, pad_width)
+ 
+        # 2. Convolution (VALID — no further padding)
+        # Compute masked weights
+        mask = jax.lax.stop_gradient(self.mask)
+        kernel = self.kernel * mask
+        # flatten batch dimensions if multiples
+        x_flat = x.reshape((-1, *x.shape[-2:]))
+        pre_activation = jax.lax.conv_general_dilated(
+            x_flat,
+            kernel,
+            window_strides=(self.kernel_stride,),
+            padding="VALID",
+            dimension_numbers=("NWC", "WIO", "NWC"),
+        )
+        # reshape back the batch dimensions
+        pre_activation = pre_activation.reshape(
+            (*x.shape[:-2], *pre_activation.shape[-2:])
+        )
+ 
+        # 3. Add bias
+        if self.use_bias:
+            pre_activation += self.bias
+        
+        z = jax.nn.sigmoid(pre_activation)
+        y = ut.threshold_softgradient(pre_activation)
+
+        # Aggregate temporally using max_pool or avg_pool
+        p = nn.max_pool(
+            z,
+            window_shape=(self.pool_size,),
+            strides=(self.pool_stride,),
+            padding="SAME",
+        )
+
+        outs = {
+            "z": z,
+            "y": y,
+            "p": p,
+        }
+        return outs
+    
+class TCNDelay(nn.Module):
+    """
+    A stack of masked conv layers
+    """
+
+    in_features: Sequence[int]
+    features: Sequence[int]
+    kernel_sizes: Sequence[int]
+    kernel_strides: Sequence[int]
+    pool_sizes: Sequence[int]
+    pool_strides: Sequence[int]
+    use_bias: bool = True
+    stop_grad: bool = False
+
+    def setup(self):
+        self.layers = [
+            TMaskedConvPoolLayer(
+                in_features=self.in_features[i],
+                features=self.features[i],
+                kernel_size=self.kernel_sizes[i],
+                kernel_stride=self.kernel_strides[i],
+                pool_size=self.pool_sizes[i],
+                pool_stride=self.pool_strides[i],
+                use_bias=self.use_bias
+            )
+            for i in range(len(self.features))
+        ]
+
+    def out_to_next(self, out):
+        x_in = out["p"]
+        if self.stop_grad:
+            x_in = jax.lax.stop_gradient(x_in)
+        return x_in
+
+    def __call__(self, x):
+        outs = []
+
+        x_in = x
+        for l_idx in range(len(self.layers)):
+            out = self.layers[l_idx](x_in)
+            outs.append(out)
+            # Input to next layer
+            x_in = self.out_to_next(out)
+
+        return outs
+
+class TCNDelayClassifier(TCNDelay):
+
+    pre_features : Sequence[int] = None
+    class_features : int = 1
+    stop_grad_class : bool = False
+
+    def setup(self):
+        super().setup()
+        if self.pre_features is None:
+            self.pre_layers = []
+        else:
+            self.pre_layers = [
+                nn.Dense(features=f)
+                for f in self.pre_features
+            ]
+        self.classifier = nn.Dense(features=self.class_features)
+
+    def outs_to_class_in(self, outs):
+        x_in = outs[-1]["p"]
+        if self.stop_grad_class:
+            x_in = jax.lax.stop_gradient(x_in)
+        return x_in
+
+    def __call__(self, x):
+
+        # preprocess the input
+        for l_idx in range(len(self.pre_layers)):
+            x = self.pre_layers[l_idx](x)
+        # call conv masked stack
+        outs = super().__call__(x)
+        # call classifier
+        class_in = self.outs_to_class_in(outs)
+        logit = self.classifier(class_in)
+
+        aux = {
+            "logit": logit,
+        }
+        return outs, aux
+
 
 
 class TCN(nn.Module):
@@ -906,3 +1132,281 @@ class TCNDelayPoolClassifierMulti(nn.Module):
 
         return outs, auxs
     
+
+
+class DelayedPoolLayer(nn.Module):
+    """Causal dense layer with random fixed delays on connections
+    """
+ 
+    features: int
+    in_features: int
+    max_delay: int
+    pool_size: int
+    pool_stride: int
+    use_bias: bool = True
+ 
+ 
+    def setup(self) -> None:
+        # Then, init delay module
+        self.delayer = DelayedLinear(
+            features=self.features,
+            n_in=self.in_features,
+            max_delay=self.max_delay,
+            use_bias=self.use_bias,
+            kernel_init=jax.nn.initializers.lecun_normal(),
+            bias_init=jax.nn.initializers.constant(0.0),
+            
+        )
+ 
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """Apply causal temporal scan with moving buffer.
+ 
+        Args:
+            x: Float array of shape ``(*batch_dims, time, features)``.
+               Any number of leading batch dimensions is supported.
+ 
+        Returns:
+            Float array of shape ``(*batch_dims, time_out, self.features)``
+            where ``time_out = ⌊(time − 1) / stride⌋ + 1``.
+        """
+ 
+        # Initialize a buffer
+        buf0 = self.delayer.init_buffer(example_input=x[..., 0, :])
+
+        #
+        _, a = self.delayer.scan(
+            x_seq=x,
+            buf=buf0,
+        )
+        z = jax.nn.sigmoid(a)
+
+        # Aggregate temporally using max_pool or avg_pool
+        p = nn.max_pool(
+            z.reshape((-1, *z.shape[-2:])),
+            window_shape=(self.pool_size,),
+            strides=(self.pool_stride,),
+            padding="SAME",
+        ).reshape((*z.shape[:-2], -1, z.shape[-1]))
+
+        # compute outputs
+        out = {
+            "z": z,
+            "p": p,
+        }
+
+        return out
+    
+class DelayStream(nn.Module):
+    """A stack of DelayedPoolLayers
+    """
+    pre_features : Sequence[int]
+    features : Sequence[int]
+    in_features : Sequence[int]
+    max_delays : Sequence[int]
+    pool_sizes : Sequence[int]
+    pool_strides : Sequence[int]
+    stop_grad : bool = False
+
+    def setup(self,):
+        
+        # standard layers before the delayed part
+        self.pre_layers = [
+            nn.Dense(features=f)
+            for f in self.pre_features
+        ]
+        # Delayed layers
+        self.delayers = [
+            DelayedPoolLayer(
+                features=f,
+                in_features=self.in_features[i],
+                max_delay=self.max_delays[i],
+                pool_size=self.pool_sizes[i],
+                pool_stride=self.pool_strides[i],
+            )
+            for i, f in enumerate(self.features)
+        ]
+
+    def __call__(self, x):
+        x_in = x
+        for l_idx in range(len(self.pre_layers)):
+            x_in = self.pre_layers[l_idx](x_in)
+            x_in = jax.nn.swish(x_in)
+
+        outs = []
+        for l_idx in range(len(self.delayers)):
+            out = self.delayers[l_idx](x_in)
+            outs.append(out)
+            # Input to next layer
+            x_in = out["p"]
+            if self.stop_grad:
+                x_in = jax.lax.stop_gradient(x_in)
+
+        return outs
+    
+class DelayStreamClassifier(DelayStream):
+    class_features : int = 1
+    stop_grad_class : bool = False
+
+    def setup(self,):
+        super().setup()
+        self.classifier = nn.Dense(features=self.class_features)
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        class_in = outs[-1]["p"]
+        if self.stop_grad_class:
+            class_in = jax.lax.stop_gradient(class_in)
+        logits = self.classifier(class_in)
+        aux = {
+            "logit": logits
+        }
+        return outs, aux
+     
+
+class DepthwiseTimeConvLayer(nn.Module):
+    """A single depthwise temporal convolutional layer"""
+    in_features: int
+    features: int
+    kernel_size: int
+    kernel_stride: int
+    pool_size: int
+    pool_stride: int
+    activation_fn: str = "swish"
+    # residual: bool = True
+    layer_norm: bool = True
+
+    def setup(self):
+        # temporal convolution layer
+        # with depthwise convolution (same kernel for each feature)
+        self.depth = nn.Conv(
+            features=self.in_features, #self.in_features if self.residual else self.features,
+            kernel_size=(self.kernel_size,),
+            strides=(self.kernel_stride,),
+            padding="VALID",
+            kernel_init=jax.nn.initializers.lecun_normal(),
+            bias_init=jax.nn.initializers.constant(0.0),
+            # for depthwise convolution
+            feature_group_count=self.in_features,
+        )
+
+        # followed by a dense layer (aggregating different features pointwise)
+        self.point = nn.Dense(
+            features=self.features,
+            kernel_init=jax.nn.initializers.lecun_normal(),
+            bias_init=jax.nn.initializers.constant(0.0),
+        )
+
+        # activation function
+        self.fn = config_activation_dict[self.activation_fn]
+
+        # layer norm
+        self.ln1 = nn.LayerNorm()
+        if self.layer_norm:
+            self.ln2 = nn.LayerNorm()
+
+    def __call__(self, x):
+
+        # 1. Causal padding
+        # Prepend (kernel_size − 1) zero frames so each output step only
+        # sees the present and past inputs, never future ones.
+        #
+        # np.pad expects a sequence of (before, after) pairs, one per axis.
+        # Layout: [...batch axes..., time axis, feature axis]
+        pad_size = self.kernel_size - 1
+        if pad_size > 0:
+            pad_width = [(0, 0)] * (x.ndim - 2) + [(pad_size, 0), (0, 0)]
+            x = np.pad(x, pad_width)
+
+        # Depthwise Convolution
+        a = self.depth(x)
+        # # Activation
+        # a = self.fn(a)
+        # # Layer norm
+        # a = self.ln1(a)
+        # Pointwise Pass
+        a = self.point(a)
+        # residual output
+        # if self.layer_norm:
+        #     # layer norm
+        #     a = self.ln2(a)
+        # activation
+        z = self.fn(a)
+
+        # Aggregate temporally using max_pool or avg_pool
+        p = nn.max_pool(
+            z.reshape((-1, *z.shape[-2:])),
+            window_shape=(self.pool_size,),
+            strides=(self.pool_stride,),
+            padding="SAME",
+        ).reshape((*z.shape[:-2], -1, z.shape[-1]))
+
+        # compute outputs
+        out = {
+            "z": z,
+            "p": p,
+        }
+
+        return out
+    
+    
+class DepthwiseTCN(nn.Module):
+    in_features: int
+    features: Sequence[int]
+    kernel_sizes: Sequence[int]
+    kernel_strides: Sequence[int]
+    pool_sizes: Sequence[int]
+    pool_strides: Sequence[int]
+    activation_fn: str = "swish"
+
+    def setup(self):
+        # define layers (note, last one should have sigmoid activation)
+        layers = []
+        in_f = self.in_features
+        for i in range(len(self.features)-1):
+            layers.append(
+                DepthwiseTimeConvLayer(
+                    in_features=in_f,
+                    features=self.features[i],
+                    kernel_size=self.kernel_sizes[i],
+                    kernel_stride=self.kernel_strides[i],
+                    pool_size=self.pool_sizes[i],
+                    pool_stride=self.pool_strides[i],
+                    activation_fn=self.activation_fn,
+                    layer_norm=True,
+                )
+            )
+            # Update input features to next layer
+            in_f = self.features[i]
+
+        layers.append(
+            DepthwiseTimeConvLayer(
+                in_features=in_f,
+                features=self.features[-1],
+                kernel_size=self.kernel_sizes[-1],
+                kernel_stride=self.kernel_strides[-1],
+                pool_size=self.pool_sizes[-1],
+                pool_stride=self.pool_strides[-1],
+                activation_fn="sigmoid",
+                layer_norm=False,
+            )
+        )
+
+        self.layers = layers
+
+    def out_to_next(self, out):
+        x_in = out["p"]
+        return x_in
+
+    def __call__(self, x):
+        outs = []
+
+        x_in = x
+        for l_idx in range(len(self.layers)):
+            out = self.layers[l_idx](x_in)
+            outs.append(out)
+            # Input to next layer
+            x_in = self.out_to_next(out)
+        
+        aux = {}
+
+        return outs, aux

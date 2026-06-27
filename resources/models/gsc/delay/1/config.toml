@@ -1,29 +1,33 @@
 [model]
-type = "CloneTestClassifier"
-seed = 45
+type = "DelayStreamClassifier"
+seed = 46
+p_target = 0.01
 [model.kwargs]
-in_features = [256]
-features = [128]
-clones = [6]
+pre_features = [128]
+features = [256, 256, 256]
+in_features = [128, 256, 256]
+max_delays = [5, 9, 13]
+pool_sizes = [3, 3, 3]
+pool_strides = [2, 2, 2]
+class_features = 35 # number of classes
 stop_grad = false
-out_labels = 35
-class_kernel_size = 50
-class_kernel_stride = 9
+stop_grad_class = false
    
 [dataset]
 [dataset.transform.specaugment.kwargs]
-n_time_masks = 2
-max_time_width = 5 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
-n_freq_masks = 2
+n_time_masks = 5
+max_time_width = 3 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
+n_freq_masks = 3
 max_freq_width = 2
 
 [training]
-epochs = 150
+epochs = 80
 batch_size = 256
+num_classes = 35
 
 [training.checkpoint]
 save = true
-save_interval = 2 # epochs
+save_interval = 4 # epochs
 max_to_keep = 12
 
 [training.dataloader]
@@ -33,21 +37,21 @@ shuffle = true
 drop_last = true
 
 [training.loss]
-eps = 3.0e-2
-w_eps = 1.0e-1
-class_steps = 60
+eps = 1e-1
+w_eps = 1.0e-2
+class_steps = 50
 
 [training.optimizer]
 type = "adamw"
 [training.optimizer.kwargs]
-learning_rate = 0.001
-weight_decay = 0.00001
+learning_rate = 0.002
+weight_decay = 0.00002
 
 [validation]
 split = 0.16
 eval_interval = 12
 [validation.dataloader]
-batch_size = 372
+batch_size = 128
 [validation.sim_fn]
 type = "log_and"
 quantile = 0.9
