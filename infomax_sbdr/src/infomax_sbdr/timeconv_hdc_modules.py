@@ -8,7 +8,8 @@ import infomax_sbdr.binary_comparisons as bc
 import infomax_sbdr.utils as ut
 import infomax_sbdr.initializers as my_inits
 from infomax_sbdr.delay_modules import DelayedLinear
-import numpy as onp
+# import numpy as onp
+from infomax_sbdr.clip_directional_gradient import directional_clip
 
 config_activation_dict = {
     "relu": nn.relu,
@@ -343,7 +344,7 @@ class TemporalConvPoolLayer(nn.Module):
             strides=(self.kernel_stride,),
             padding="VALID",
             use_bias=self.use_bias,
-            bias_init=nn.initializers.constant(-1.0),
+            bias_init=nn.initializers.constant(0.3),
         )
  
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -370,8 +371,10 @@ class TemporalConvPoolLayer(nn.Module):
  
         # 2. Convolution (VALID — no further padding)
         pre_activation = self.conv(x)
-        z = jax.nn.sigmoid(pre_activation)
-        y = ut.threshold_softgradient(pre_activation)
+        # z = jax.nn.sigmoid(pre_activation)
+        # y = ut.threshold_softgradient(pre_activation)
+        z = directional_clip(pre_activation, lo=0.0, hi=1.0)
+        y = z.copy()
 
         # Aggregate temporally using max_pool or avg_pool
         p = nn.max_pool(

@@ -11,7 +11,7 @@ pool_strides = [2, 2, 2]
 class_features = 35 # number of classes
 stop_grad = false
 stop_grad_class = false
-binarize = true
+binarize = false
 
 [dataset]
 [dataset.transform.specaugment.kwargs]
@@ -44,8 +44,8 @@ class_steps = 50
 [training.optimizer]
 type = "adamw"
 [training.optimizer.kwargs]
-learning_rate = 0.01
-weight_decay = 0.001
+learning_rate = 0.0001
+weight_decay = 0.00001
 
 [validation]
 split = 0.16

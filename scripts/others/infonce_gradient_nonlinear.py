@@ -20,12 +20,12 @@ def forward(params, x):
     # return 0.5 * (1 + np.sin(x @ params["W"] + params["b"]))
     # return np.abs(x @ params["W"] + params["b"])
     a = x @ params["W"] + params["b"]
-    # return sbdr.ut.threshold_ste(a)
-    # return jax.nn.sigmoid(a)
-    v = np.clip(a, a_min=0, a_max=1)
-    v_zero = a - jax.lax.stop_gradient(a)
-    extra_grad = -v_zero * 0.01
-    v = v + (0.5 - a) * 0.01
+    # v = np.clip(a, a_min=0, a_max=1)
+    # v_zero = a - jax.lax.stop_gradient(a)
+    # extra_grad = -v_zero * 0.01
+    # v = v + (0.5 - a) * 0.01
+    v = sbdr.directional_clip(a, lo=0.0, hi=1.0)
+    # v = jax.nn.sigmoid(a)
     return v
 
 def forward_avg(params, x):

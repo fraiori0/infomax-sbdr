@@ -269,45 +269,45 @@ def loo_label_means(
     return loo_sums / (loo_counts[:, None] + 1e-6)        # (n_labels, F)
 
 
-@jax.custom_vjp
-def directional_clip(x, min_val=0.0, max_val=1.0):
-    # Forward pass: Standard clip
-    return np.clip(x, min_val, max_val)
+# @jax.custom_vjp
+# def directional_clip(x, min_val=0.0, max_val=1.0):
+#     # Forward pass: Standard clip
+#     return np.clip(x, min_val, max_val)
 
-def directional_clip_fwd(x, min_val, max_val):
-    # The forward function returns the primal output 
-    # and the residuals needed for the backward pass
-    primal_out = directional_clip(x, min_val, max_val)
-    return primal_out, (x, min_val, max_val)
+# def directional_clip_fwd(x, min_val, max_val):
+#     # The forward function returns the primal output 
+#     # and the residuals needed for the backward pass
+#     primal_out = directional_clip(x, min_val, max_val)
+#     return primal_out, (x, min_val, max_val)
 
-def directional_clip_bwd(res, g):
-    x, min_val, max_val = res
+# def directional_clip_bwd(res, g):
+#     x, min_val, max_val = res
     
-    # In standard gradient descent, x = x - (lr * g).
-    # If g > 0, the optimizer will shrink x.
-    # If g < 0, the optimizer will grow x.
+#     # In standard gradient descent, x = x - (lr * g).
+#     # If g > 0, the optimizer will shrink x.
+#     # If g < 0, the optimizer will grow x.
 
-    # Condition 1: Inside the boundary (pass gradient through)
-    in_bounds = (x >= min_val) & (x <= max_val)
+#     # Condition 1: Inside the boundary (pass gradient through)
+#     in_bounds = (x >= min_val) & (x <= max_val)
     
-    # Condition 2: Above boundary AND gradient pushes x down
-    pull_down = (x > max_val) & (g > 0)
+#     # Condition 2: Above boundary AND gradient pushes x down
+#     pull_down = (x > max_val) & (g > 0)
     
-    # Condition 3: Below boundary AND gradient pushes x up
-    pull_up = (x < min_val) & (g < 0)
+#     # Condition 3: Below boundary AND gradient pushes x up
+#     pull_up = (x < min_val) & (g < 0)
 
-    # Combine conditions into a single mask
-    keep_grad_mask = in_bounds | pull_down | pull_up
+#     # Combine conditions into a single mask
+#     keep_grad_mask = in_bounds | pull_down | pull_up
 
-    # Apply the mask: pass upstream gradient 'g' if True, else 0.0
-    grad_x = np.where(keep_grad_mask, g, 0.0)
+#     # Apply the mask: pass upstream gradient 'g' if True, else 0.0
+#     grad_x = np.where(keep_grad_mask, g, 0.0)
 
-    # Return gradients for all inputs (x, min_val, max_val). 
-    # We return None for the boundaries assuming they are static/non-trainable.
-    return (grad_x, None, None)
+#     # Return gradients for all inputs (x, min_val, max_val). 
+#     # We return None for the boundaries assuming they are static/non-trainable.
+#     return (grad_x, None, None)
 
-# Bind the forward and backward passes to the custom operation
-directional_clip.defvjp(directional_clip_fwd, directional_clip_bwd)
+# # Bind the forward and backward passes to the custom operation
+# directional_clip.defvjp(directional_clip_fwd, directional_clip_bwd)
 
 
 @partial(jax.jit, static_argnames=['n', 'local_radius'])
