@@ -278,73 +278,152 @@ class DenseNCEWeights(nn.Module):
             "z": z,
         }
 
-# class TransformerNCELayer(nn.Module):
-#     """
-#     Attention-like module that uses a form of attention similar to InfoNCE
-#     with custom critic g(q,k) = log(<q, k> + eps) (before simplifying with the exponential)
-#     """
-#     in_features: int
-#     out_features: int
-#     hid_features: int
-#     eps: float = 1e-2
-#     out_activation_fn: Callable = threshold_softgradient
-  
-#     def setup(self):
+class SparseDictionary(nn.Module):
+    """
+    Encoder module with also a set of reconstruction weights
+    """
 
-#         self.q_proj = nn.Dense(features=self.hid_features)
-#         self.k_proj = nn.Dense(features=self.hid_features)
-#         self.v_proj = nn.Dense(features=self.out_features)
+    in_features : int
+    features : int
+    pre_features : Sequence[int]
+    n_steps : int
+    non_negative_init : bool = False # whether to initialize with a non-negative dictionary
+    activation_fn : Callable = jax.nn.gelu
+    use_dropout: bool = False
+    dropout_rate: float = 0.0
+    training: bool = True
+    extra_unit_softmax : int = 1 # number of extra units to add to the softmax to allow for empty softmax
 
-#     def score(self, q, k):
-#         # compute score
-#         return (q*k).sum(axis=-1) + self.eps
+    def setup(self):
+
+        assert self.n_steps > 0, "n_steps must be greater than 0"
+
+        # # pre-layers
+        # pre_layers = []
+        # for i in range(len(self.pre_features)):
+        #     pre_layers.append(nn.Dense(features=self.pre_features[i]))
+        #     pre_layers.append(self.activation_fn)
+        #     # dropout
+        #     if self.use_dropout:
+        #         pre_layers.append(nn.Dropout(rate=self.dropout_rate, deterministic=not self.training))
+                
+        # # Stack together
+        # self.pre_layers = nn.Sequential(pre_layers)
+
+        # Iterative layer
+        self.r = nn.Sequential([
+            # nn.Dense(features=self.features),
+            # self.activation_fn,
+            # note, we use some extra "sink features" to allow for empty softmax
+            nn.Dense(features=(self.in_features + self.extra_unit_softmax)), 
+        ])
+
+        # Dictionar of atoms, practically a linear layer
+        if self.non_negative_init:
+            k_init = my_inits.non_negative(scale=1.0/np.sqrt(self.in_features))
+        else:
+            k_init = nn.initializers.normal(scale=1.0/np.sqrt(self.in_features))
+        self.D = nn.Dense(
+            features=self.in_features,
+            kernel_init=k_init,
+        )
+
+    def __call__(self, x):
+        # apply pre-layers
+        # _ = self.pre_layers(x)
+        
+        # iterative updates
+        def step(crr, inp):
+            x_res = crr
+            # encode
+            z = jax.nn.softmax(self.r(x_res), axis=-1)
+            # remove the extra features
+            z = z[..., :-self.extra_unit_softmax]
+            # reconstruct
+            x_hat = self.D(z)
+            # remove the reconstruction, work like an iterative residual model
+            x_res = x_res - x_hat
+            next_crr = x_res
+            out = {
+                "x_hat": x_hat,
+                "z": z
+            }
+            return next_crr, out
+        
+        # call the step once, to avoid leaked trace during compilation of jax
+        _ = step(x, None)
+        
+        # scan over the steps
+        _, outs_seq = jax.lax.scan(
+            step,
+            x,
+            None,
+            length=self.n_steps
+        )
+
+        # take the maximum of activations over the steps
+        outs_seq["z"] = outs_seq["z"].max(0)
+        # sum the reconstruction
+        outs_seq["x_hat"] = outs_seq["x_hat"].sum(0)
+        
+        outs = {
+            "x_hat": outs_seq["x_hat"],
+            "z": outs_seq["z"],
+            "x_original": x,
+        }
+       
+        return outs
+
+        
+class SparseDictionaryClassifier(SparseDictionary):
+    """
+    SparseDictionary with a classifier head
+    """
+
+    n_classes : int = 1
+    stop_grad_class : bool = True
+
+    def setup(self):
+        super().setup()
+        self.classifier = nn.Dense(features=self.n_classes)
+
+    def __call__(self, x):
+        outs = super().__call__(x)
+        # classify using the activations
+        c_in = outs["z"]
+        if self.stop_grad_class:
+            c_in = jax.lax.stop_gradient(c_in)
+        logits = self.classifier(c_in)
+        outs["logits"] = logits
+        return outs
+
+
+
+class SparseDenseLayer(nn.Module):
+    features: int
+    out_features: int
+    kernel_init: Callable = nn.initializers.lecun_normal()
+
+    def setup(self):
+        self.r = nn.Dense(
+            features=self.features,
+            kernel_init=self.kernel_init,
+            bias_init=nn.initializers.constant(-2.0),
+        )
+        self.d = nn.Dense(
+            features=self.out_features,
+            kernel_init=self.kernel_init,
+            use_bias=False,
+        )
+
+    def __call__(self, x):
+        z = self.r(x)
+        z = jax.nn.sigmoid(z)
+        y = self.d(z)
+        out = {
+            "z": z,
+            "y": y,
+        }
+        return out
     
-#     def compute_weights(self, q, k):
-#         p_ii = self.score(q, k)
-#         k_avg = k.reshape((-1, k.shape[-1])).mean(axis=0)
-#         p_ij = self.score(q, k_avg)
-
-#         weights = p_ii / p_ij
-
-#         return weights
     
-#     def __call__(self, x_q, x_k):
-#         q = self.q_proj(x_q)
-#         k = self.k_proj(x_k)
-#         v = self.v_proj(x_q)
-
-#         # binarize using a threshold with a sigmoid surrogate gradient
-#         q = self.out_activation_fn(q)
-#         k = self.out_activation_fn(k)
-#         # compute weights
-#         weights = self.compute_weights(q, k)
-#         # compute value output
-#         v = v * weights[..., None]
-#         v = self.out_activation_fn(v)
-
-#         return {"q": q, "k": k, "v": v,}
-    
-
-# class TransformerNCEFLO(TransformerNCELayer):
-#     hid_features_negpmi: Sequence[int]
-#     activation_fn: Callable = jax.nn.mish
-#     out_activation_fn: Callable = nn.sigmoid
-#     use_batchnorm: bool = False
-#     use_dropout: bool = False
-#     dropout_rate: float = 0.0
-#     training: bool = True  # whether in training or eval mode (for dropout/batchnorm)
-
-#     def setup(self):
-#         super().setup()
-
-#         negpmi_layers = []
-#         for f in self.hid_features_negpmi:
-#             negpmi_layers.append(nn.Dense(features=f))
-#             negpmi_layers.append(self.activation_fn)
-#         negpmi_layers.append(nn.Dense(features=1))
-#         self.negpmi_layers = nn.Sequential(negpmi_layers)
-
-#     def __call__(self, x_q, x_k):
-#         outs = super().__call__(x_q, x_k)
-#         outs["neg_pmi"] = self.negpmi_layers(outs["q"])
-#         return outs

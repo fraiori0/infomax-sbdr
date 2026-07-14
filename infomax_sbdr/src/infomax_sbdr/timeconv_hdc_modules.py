@@ -343,7 +343,7 @@ class TemporalConvPoolLayer(nn.Module):
             strides=(self.kernel_stride,),
             padding="VALID",
             use_bias=self.use_bias,
-            bias_init=nn.initializers.constant(-1.5),
+            bias_init=nn.initializers.constant(-1.0),
         )
  
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -656,7 +656,9 @@ class TCNPoolClassifier(nn.Module):
     pool_strides: Sequence[int]
     class_features: int
     use_bias: bool = True
-    stop_grad: bool = True
+    stop_grad: bool = False
+    stop_grad_class: bool = False
+    binarize: bool = False
  
     def setup(self) -> None:
         if len(self.features) != len(self.kernel_sizes):
@@ -678,13 +680,29 @@ class TCNPoolClassifier(nn.Module):
             for i in range(len(self.features))
         ]
 
-        # input to the dense module is the flattened
-        # outer product of the sparse representation in the two last layers
-        self.classifier = nn.Dense(self.class_features)
+        # classifier, the extra feature is treated as a gate on the logits
+        self.classifier = nn.Dense(self.class_features + 1) 
+    
+    def out_to_next(self, out):
+        x = out["p"]
+        if self.stop_grad:
+            x = jax.lax.stop_gradient(x)
+        if self.binarize:
+            x = np.where(x > 0.1, x, 0.0)
+        return x
+
+    def gather_input_classifier(self, outs):
+        x = outs[-1]["p"]
+        if self.stop_grad_class:
+            x = jax.lax.stop_gradient(x)
+        return x
+    
+    def class_out_to_logits(self, class_out):
+        gate = jax.nn.sigmoid(class_out[..., -1])
+        logits = class_out[..., :-1] * gate[..., None]
+        return logits
 
     def __call__(self, x):
-        th = 0.3
-
         # # # Forward psss
         # return all intermediate outputs
         outs = []
@@ -695,28 +713,12 @@ class TCNPoolClassifier(nn.Module):
             outs.append(out)
             
             # Input to next layer
-            x_in = out["p"]
-            if self.stop_grad:
-                x_in = jax.lax.stop_gradient(x_in)
-                
-        
-        # # # Classifier
-        # # Compute outer product of the last two last layers' encodings
-        # idx_h = max(0, len(self.layers)-2)
-        # idx_g = len(self.layers)-1
-        # # We use p so that it has the same time dimension than y at the next layer
-        # h = outs[idx_h]["p"]
-        # g = outs[idx_g]["z"]
-        # # # Should we stop the gradient here?
-        # # h = jax.lax.stop_gradient(h)
-        # # g = jax.lax.stop_gradient(g)
-        # # Compute outer product on feature dimension
-        # hg = h[..., :, None] * g[..., None, :]
-        # # Flatten last two dimensions
-        # hg = hg.reshape((*hg.shape[:-2], -1))
+            x_in = self.out_to_next(out)
+    
         # Compute linear layer
-        hg = outs[-1]["p"]
-        logit = self.classifier(hg)
+        class_in = self.gather_input_classifier(outs)
+        class_out = self.classifier(class_in)
+        logit = self.class_out_to_logits(class_out)
 
         aux = {
             "logit": logit,
@@ -1109,7 +1111,7 @@ class TCNDelayPoolClassifierMulti(nn.Module):
     def __call__(self, x):
         th = 0.3
 
-        # # # Forward psss
+        # # # Forward pass
         # return all intermediate outputs
         outs = []
         auxs = []

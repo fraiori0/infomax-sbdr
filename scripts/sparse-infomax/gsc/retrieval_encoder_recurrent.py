@@ -116,9 +116,9 @@ pprint(model_config)
 
 data_folder = os.path.join(model_folder, "activations")
 
-# # Import data from JSON of sparse nested list index of activations
-# with open(os.path.join(data_folder, f"{data_prefix}_sparse_train.json"), "r") as f:
-#     train_e_sparse = json.load(f)
+# Import data from JSON of sparse nested list index of activations
+with open(os.path.join(data_folder, f"{data_prefix}_sparse_train.json"), "r") as f:
+    train_e_sparse = json.load(f)
 
 with open(os.path.join(data_folder, f"{data_prefix}_sparse_val.json"), "r") as f:
     val_e_sparse = json.load(f)
@@ -132,31 +132,33 @@ print("\nLoaded activations from:\n\t", data_folder)
 db_m_config = ModelConfig(
     mode="votes",                  # "votes" or "infonce_global"
     advance_mean=1.0,              # μ: expected positions advanced per frame
-    advance_spread=3.0,            # σ: warp tolerance (also sets kernel length)
+    advance_spread=2.0,            # σ: warp tolerance (also sets kernel length)
     stay_prob=0.4,                 # ρ: mass kept at current position (slow/holds)
-    emission_floor=0.1,           # ε: per-position emission floor (noise robustness)
-    leak_uniform=0.06,             # η: uniform mixing (re-acquisition/recovery)
-    infonce_c=0.03,                # c: InfoNCE additive constant (infonce_global only)
-    kernel_mode="reference_compat" # "reference_compat" or "spec_exact"
+    emission_floor=0.05,           # ε: per-position emission floor (noise robustness)
+    leak_uniform=0.2,              # η: uniform mixing (re-acquisition/recovery)
+    infonce_c=0.01,                # c: InfoNCE additive constant (infonce_global only)
+    kernel_mode="spec_exact"       # "reference_compat" or "spec_exact"
 )
 
 db_s_config = ScalableConfig(
     n_candidates=64,      # C: number of full-state candidates tracked
     prefilter_warmup=15,  # frames of cheap scoring before first prune
-    prefilter_every=3,    # refresh the candidate set every N frames
+    prefilter_every=1,    # refresh the candidate set every N frames
     keep_floor=0,         # (inert; kept for reference compatibility)
 )
 
 # # Initialize Database
+KEY_ENCODINGS = "zf"
 bin_path = os.path.join(model_folder, "activations", "db.bin")
-# db = Database.build(
-#     train_e_sparse["z"],
-#     labels=train_e_sparse["label"],
-#     d=model_config["model"]["kwargs"]["features"],
-# )
+db = Database.build(
+    val_e_sparse[KEY_ENCODINGS],
+    labels=val_e_sparse["label"],
+    d=model_config["model"]["kwargs"]["features"],
+)
 # save activations
 # db.save(bin_path)
-db = Database.load(bin_path)
+# # Load from save, instead
+# db = Database.load(bin_path)
 
 # free memory
 # del train_e_sparse
@@ -167,22 +169,38 @@ eng = db.scalable_engine(
     db_s_config,
 )
 
-# test with one sequence from the val set
-for i_test in [0, 200, 400, 500, 600, 700, 1500, 3000, 4000, 5000, 5050, 5051, 5052]: # range(len(val_e_sparse["z"])):
+# test with some randomsequences from val set (just to see if it works)
+key = jax.random.key(0)
+
+for _ in range(20):
+    
+    # gen random integer index for the sequence
+    key, empty = jax.random.split(key)
+    i_test = jax.random.randint(key, (1,), 0, len(val_e_sparse["z"])).item()
     print(f"Testing sequence {i_test}")
-    for t in range(len(val_e_sparse["z"][i_test])):
-        # get fram
-        frame = val_e_sparse["z"][i_test][t]
+
+    # reset engine
+    eng.reset()
+
+    seq = val_e_sparse[KEY_ENCODINGS][i_test]
+    lab = val_e_sparse["label"][i_test]
+
+    for t in range(len(seq)):
+        # get frame
+        frame = seq[t]
         frame = onp.array(frame, dtype=onp.uint32)
         # run
         eng.step(frame)
         # score and print to check
         idx, score = eng.best()
-        label_pred = eng.predict_label(k=5)
+        label_pred = eng.predict_label(k=15, tau=0.1)
         # # print so it updates the same line, canceling what was previously written
         # print(f"\r\t{t} | ({idx} : {score:.3f}) - {label_pred}", end="")
         # just print instead
-        if t % 10 == 0:
-            print(f"\t{t} | ({idx} : {score:.3f}) - {label_pred} true: {val_e_sparse['label'][i_test]}")
+        # if t % 32 == 0:
+        #     print(f"\t{t} | ({idx} : {score:.3f}) - {label_pred} true: {lab}")
+
+
+    print(f"\t{t} | ({idx} : {score:.3f}) - {label_pred} true: {lab}")
 
 

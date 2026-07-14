@@ -347,15 +347,16 @@ def collect_data(dataloader, seed=CHKP_STEP):
     for batch_idx, (xs, labels) in tqdm(
         enumerate(dataloader), leave=False, total=len(dataloader)
     ):
-        # # quikc debug
-        # if batch_idx > 10:
-        #     break
+        # quick debug
+        if batch_idx > 10:
+            break
 
         key, _ = jax.random.split(key)
         outs, aux = forward_jitted(variables, xs, key)
         
+        # # # Sparsify
         # set to 1 values above a threshold
-        thrsh = 0.12
+        thrsh = 0.15
         outs["z"] = np.where(outs["z"] > thrsh, 1.0, 0.0).astype(np.uint8)
         outs["zf"] = np.where(outs["zf"] > thrsh, 1.0, 0.0).astype(np.uint8)
 
@@ -377,7 +378,10 @@ def collect_data(dataloader, seed=CHKP_STEP):
     return encodings, encodings_sparse
 
 train_e, train_e_sparse = collect_data(dataloader_train)
+
 val_e, val_e_sparse = collect_data(dataloader_val)
+
+print("\nEncoding done")
 
 # concatenate and convert to uint8 z and zf
 for k in train_e.keys():
@@ -387,19 +391,34 @@ for k in train_e.keys():
     train_e[k] = onp.array(train_e[k])
     val_e[k] = onp.array(val_e[k])
 
-# # Convert to original NumPy array and save compressed
-# onp.savez_compressed(
-#     os.path.join(model_folder, f"{save_prefix}_train.npz"),
-#     **train_e
-# )
-# onp.savez_compressed(
-#     os.path.join(model_folder, f"{save_prefix}_val.npz"),
-#     **val_e
-# )
+print ("\nSaving data (NumPy)")
+# Convert to original NumPy array and save compressed
+onp.savez_compressed(
+    os.path.join(model_folder, f"{save_prefix}_train.npz"),
+    **train_e
+)
+onp.savez_compressed(
+    os.path.join(model_folder, f"{save_prefix}_val.npz"),
+    **val_e
+)
 
+print("\nSaving data (JSON)")
 # Save also the sparse activation nested list
 # as JSON file
 with open(os.path.join(save_path, f"{save_prefix}_sparse_train.json"), "w") as f:
     json.dump(train_e_sparse, f)
 with open(os.path.join(save_path, f"{save_prefix}_sparse_val.json"), "w") as f:
     json.dump(val_e_sparse, f)
+
+print("\nSparsity")
+# print quantile of per-sample sparsity and some statistics
+qs = onp.array((0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99))
+t_sample_act = train_e["z"].mean(-1).reshape(-1)
+v_sample_act = val_e["z"].mean(-1).reshape(-1)
+t_quantiles_samples = onp.quantile(t_sample_act, qs)
+v_quantiles_samples = onp.quantile(v_sample_act, qs)
+
+# print nicely
+print(f"\t\ttrain\tval")
+for i in range(len(qs)):
+    print(f"{qs[i]:.2f}:\t{t_quantiles_samples[i]:.3f}\t{v_quantiles_samples[i]:.3f}")

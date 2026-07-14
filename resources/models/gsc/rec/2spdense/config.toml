@@ -1,0 +1,58 @@
+[model]
+type = "SDAClassifier"
+seed = 45
+[model.kwargs]
+features = [256, 256]
+out_features = [256, 256]
+stop_grad = false
+out_labels = 35
+class_kernel_size = 5
+class_kernel_stride = 3
+stop_grad_class = false
+   
+[dataset]
+[dataset.transform.specaugment.kwargs]
+n_time_masks = 5
+max_time_width = 2 # over 98 steps, with standard Mel-Spectrogram params on GSC dataset
+n_freq_masks = 2
+max_freq_width = 2
+
+[training]
+epochs = 150
+batch_size = 256
+
+[training.checkpoint]
+save = true
+save_interval = 2 # epochs
+max_to_keep = 12
+
+[training.dataloader]
+shuffle = true
+# drop the last batch to avoid recompiling jitted functions because of changing input dims
+# see here https://flax-linen.readthedocs.io/en/latest/guides/data_preprocessing/full_eval.html
+drop_last = true
+
+[training.loss]
+eps = 3e-2
+w_eps = 1.0e-1
+class_steps = 60
+n_classes = 35
+
+[training.optimizer]
+type = "adamw"
+[training.optimizer.kwargs]
+learning_rate = 0.001
+weight_decay = 0.00001
+
+[validation]
+split = 0.16
+eval_interval = 12
+[validation.dataloader]
+batch_size = 256
+[validation.sim_fn]
+type = "log_and"
+quantile = 0.9
+[validation.sim_fn.kwargs]
+eps = 1.0e-2
+
+

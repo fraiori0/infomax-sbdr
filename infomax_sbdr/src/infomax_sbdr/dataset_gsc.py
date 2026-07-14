@@ -180,6 +180,74 @@ class LogMelTransform:
         return torch.log(mel + self.log_eps)
 
 
+class FractionalMelTransform:
+    """
+    Raw waveform → fractional-power mel-magnitude spectrogram.
+
+    Accepts tensors with arbitrary leading batch dimensions.
+
+    Parameters
+    ----------
+    sample_rate : int
+        Input sample rate (Hz).  Default: 16 000.
+    n_fft : int
+        FFT window length in samples.  Default: 400 (25 ms).
+    hop_length : int
+        Hop length in samples.  Default: 160 (10 ms).
+    n_mels : int
+        Number of mel filter bins.  Default: 40.
+    f_min, f_max : float
+        Frequency range for mel filters.
+    compression_power : float
+        Fractional power exponent applied to compress the dynamic range
+        while preserving absolute zeros. Default: 0.3.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        n_fft:       int = N_FFT,
+        hop_length:  int = HOP_LENGTH,
+        n_mels:      int = N_MELS,
+        f_min:     float = F_MIN,
+        f_max:     float = F_MAX,
+        compression_power: float = 0.3,
+    ) -> None:
+        self.compression_power = compression_power
+        # torchaudio.transforms.MelSpectrogram is an nn.Module; we wrap it
+        # as a plain callable here so the transform is serialisable without
+        # needing a device.
+        self._mel = T.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            f_min=f_min,
+            f_max=f_max,
+            power=1.0,  # 1.0 computes linear magnitudes before the mel-filterbank
+            norm="slaney",
+            mel_scale="slaney",
+            # center=False prevents torchaudio from padding the waveform by
+            # n_fft // 2 = 200 samples on each side before the STFT.
+            # With center=True (the default) a 16 000-sample clip produces
+            # 1 + (16400 - 400) // 160 = 101 frames instead of the expected
+            # 1 + (16000 - 400) // 160 = 98 frames.
+            center=False,
+        )
+
+    def __call__(self, waveform: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        waveform : Tensor, shape (…, T)
+
+        Returns
+        -------
+        fractional_mel : Tensor, shape (…, n_mels, n_frames)
+        """
+        mel = self._mel(waveform)                    # (…, n_mels, n_frames)
+        return torch.pow(mel, self.compression_power)
+
 class CMVNTransform:
     """
     Per-utterance Cepstral Mean and Variance Normalisation.
@@ -213,6 +281,41 @@ class CMVNTransform:
         mean = log_mel.mean(dim=-1, keepdim=True)   # (…, n_mels, 1)
         std  = log_mel.std( dim=-1, keepdim=True)   # (…, n_mels, 1)
         return (log_mel - mean) / (std + self.eps)
+    
+class MinMaxTransform:
+    """
+    Per-utterance Min-Max Normalisation.
+
+    Subtracts the time-axis minimum and divides by the time-axis 
+    (max-min) computed jointly over all mel-bins to preserve
+    dynamic range.
+    Applied after fractional-mel computation.
+
+    Accepts tensors with arbitrary leading batch dimensions.
+
+    Parameters
+    ----------
+    eps : float
+        Small constant added to the denominator for numerical stability.
+    """
+
+    def __init__(self, eps: float = 1e-8) -> None:
+        self.eps = eps
+
+    def __call__(self, frac_mel: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        frac_mel : Tensor, shape (…, n_mels, n_frames)
+
+        Returns
+        -------
+        normalised : Tensor, same shape.
+        """
+        # Normalise over the time (last) dimension, per mel bin.
+        min = frac_mel.min()   # (…, n_mels, 1)
+        max  = frac_mel.max()   # (…, n_mels, 1)
+        return (frac_mel - min) / (max - min + self.eps)
 
 
 class SpecAugmentTransform:
@@ -383,6 +486,9 @@ class GSCDataset(Dataset):
         and the key ``LogMelTransform`` parameters so that changing any
         preprocessing hyper-parameter automatically invalidates the old file.
         ``None`` (default) keeps the cache in RAM only (no disk write).
+    non_negative : bool
+        If ``True`` (default is False), the transform is changed to 
+        compute non-negative values (PCEN transform without N(0,1) scaling)
     """
 
     def __init__(
@@ -395,6 +501,7 @@ class GSCDataset(Dataset):
         cmvn_eps:        float = 1e-8,
         max_samples:     Optional[int] = None,
         cache_dir:       Optional[str | Path] = None,
+        non_negative:    bool = False,
     ) -> None:
         super().__init__()
 
@@ -407,12 +514,20 @@ class GSCDataset(Dataset):
         self.split       = split
         self.augment     = augment
         self.max_samples = max_samples
-        self.cache_dir   = Path(cache_dir) if cache_dir is not None else None
+        # if non_negative, append modify the cache directory adding a subfolder called "non_negative"
+        self.non_negative = non_negative
+        if self.non_negative:
+            # append non_negative to the path
+            self.cache_dir   = Path(os.path.join(cache_dir, "non_negative")) if cache_dir is not None else None
+        else:
+            self.cache_dir   = Path(cache_dir) if cache_dir is not None else None
 
         # --- Build preprocessing pipeline -----------------------------------
         lm_kw = log_mel_kwargs or {}
         self._log_mel = LogMelTransform(**lm_kw)
         self._cmvn    = CMVNTransform(eps=cmvn_eps)
+        self._frac_mel = FractionalMelTransform(**lm_kw)
+        self._minmax  = MinMaxTransform(eps=cmvn_eps)
 
         # --- Collect paths and integer labels for the split -----------------
         self._paths, self._labels = self._collect_split()
@@ -484,8 +599,12 @@ class GSCDataset(Dataset):
 
     def _preprocess(self, wav: torch.Tensor) -> torch.Tensor:
         """Apply LogMel + CMVN to a (1, T) waveform → (n_mels, n_frames)."""
-        spec = self._log_mel(wav)   # (1, n_mels, n_frames)
-        spec = self._cmvn(spec)     # (1, n_mels, n_frames)
+        if self.non_negative:
+            spec = self._frac_mel(wav)   # (1, n_mels, n_frames)
+            spec = self._minmax(spec)
+        else:
+            spec = self._log_mel(wav)   # (1, n_mels, n_frames)
+            spec = self._cmvn(spec)     # (1, n_mels, n_frames)
         return spec.squeeze(0)      # (n_mels, n_frames)
 
     def _cache_path(self, lm_kw: dict) -> Optional[Path]:

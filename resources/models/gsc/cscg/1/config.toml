@@ -1,14 +1,14 @@
 [model]
-type = "CloneTestClassifier"
+type = "MatchingPursuitClassifier"
 seed = 45
 [model.kwargs]
-in_features = [256]
-features = [128]
-clones = [6]
+in_features = 40
+features = [256, 256]
 stop_grad = false
 out_labels = 35
-class_kernel_size = 50
-class_kernel_stride = 9
+class_kernel_size = 20
+class_kernel_stride = 5
+stop_grad_class = false
    
 [dataset]
 [dataset.transform.specaugment.kwargs]

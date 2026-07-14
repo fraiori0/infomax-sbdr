@@ -16,3 +16,4 @@ from infomax_sbdr.dataset_xor import *
 import infomax_sbdr.analytic_score_diffusion as analytic_score_diffusion
 # import infomax_sbdr.ahtd as ahtd
 import infomax_sbdr.initializers as inits
+from infomax_sbdr.optax_clip import optax_gen_clip_transform

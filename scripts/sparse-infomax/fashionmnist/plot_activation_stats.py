@@ -31,13 +31,16 @@ models = {
         # "3": {"name": r"$\epsilon = 1e-1$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
         "4": {"name": r"$\epsilon = 0.3$", "chkp": 145, "color": "blue", "dash": "solid", "symbol":"circle"},
         # "2": {"name": r"$\epsilon = 1e0$", "chkp": 140, "color": "blue", "dash": "solid", "symbol":"circle"},
-        "7thresholdsoft": {"name": r"$\epsilon = 0.01$", "chkp": 40, "color": "blue", "dash": "solid", "symbol":"circle"},
+        # "7thresholdsoft": {"name": r"$\epsilon = 0.01$", "chkp": 40, "color": "blue", "dash": "solid", "symbol":"circle"},
     },
     "dense_sigmoid_and": {
         "4": {"name": r"$\alpha = 8.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
         # "3": {"name": r"$\alpha = 4.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
         # "2": {"name": r"$\alpha = 2.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
         # "1": {"name": r"$\alpha = 1.0$", "chkp": 150, "color": "blue", "dash": "dash", "symbol":"x"},
+    },
+    "dense_sparse_dictionary": {
+        "1": {"name": r"$\varepsilon = 1e-2$", "chkp": 45, "color": "red", "dash": "solid", "symbol":"circle"},
     },
 }
 
@@ -339,7 +342,7 @@ def keep_top_k(x, k):
         return jax.vmap(partial(keep_top_k_single, k=k))(x)
 
 # first, check if a file with the stored results is already present
-if os.path.exists(accuracy_results_path):
+if False: # os.path.exists(accuracy_results_path):
     
     print(f"Loading results from {accuracy_results_path}")
     with open(accuracy_results_path, "r") as f:

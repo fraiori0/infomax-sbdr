@@ -1,0 +1,1 @@
+Dense binary recurrent state, update via a soft XOR by the sparse representation

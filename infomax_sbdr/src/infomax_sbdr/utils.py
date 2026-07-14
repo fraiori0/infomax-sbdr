@@ -75,6 +75,7 @@ def threshold_softpp(x, a_min=0.0, a_max=1.0):
     actual_val = a_max * (x >= 0).astype(x.dtype) + a_min * (x < 0).astype(x.dtype)
     return zero + actual_val
 
+
 def hard_threshold(x):
     return (x > 0).astype(x.dtype)
 

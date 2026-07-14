@@ -73,6 +73,8 @@ config_module_dict = {
     "VGGDecoder": VGGDecoder,
     "VGGGlobalPoolFLOMultiLayerNEGPMI": VGGGlobalPoolFLOMultiLayerNEGPMI,
     "DenseNCEWeights": DenseNCEWeights,
+    "SparseDictionary" : SparseDictionary,
+    "SparseDictionaryClassifier" : SparseDictionaryClassifier,
 }
 
 config_ah_module_dict = {
@@ -95,6 +97,9 @@ config_rpl_module_dict = {
     "LinearStableClassifier": rpl.LinearStableClassifier,
     "FilterStackClassifier": rpl.FilterStackClassifier,
     "GateEncoder": rpl.GateEncoder,
+    "MatchingPursuitClassifier": rpl.MatchingPursuitClassifier,
+    "SDAClassifier": rpl.SDAClassifier,
+    "SparseXORClassifier": rpl.SparseXORClassifier,
     "TCN": tcn.TCN,
     "TCNPoolClassifier": tcn.TCNPoolClassifier,
     "TCNPoolClassifierMulti": tcn.TCNPoolClassifierMulti,
