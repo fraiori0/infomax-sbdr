@@ -556,8 +556,8 @@ def loss_fn_gen(state, batch, eval=False):
 
             # p_loss_val, p_aux = pred_infonce(z, labels)
             # z_loss_val, z_aux = encoder_infonce(z)
-            z_loss_val, z_aux = encoder_infonce(p)
-            # z_loss_val, z_aux = loo_infonce(p, batch["labels"])
+            # z_loss_val, z_aux = encoder_infonce(z)
+            z_loss_val, z_aux = loo_infonce(z, batch["labels"])
             # t_loss_val, t_aux = time_infonce(z)
             # w_loss_val, w_aux = w_abs_infonce(w)
 

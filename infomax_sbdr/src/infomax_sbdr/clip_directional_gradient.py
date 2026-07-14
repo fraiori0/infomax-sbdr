@@ -14,10 +14,10 @@ def directional_clip_bwd(lo, hi, x, g):
     at_hi = x >= hi
     # kill g>0 at lower bound (would push down/further below),
     # kill g<0 at upper bound (would push up/further above)
-    # # Original
-    # mask = np.where(at_lo, g < 0, np.where(at_hi, g > 0, True))
-    # Inverted
-    mask = np.where(at_lo, g > 0, np.where(at_hi, g < 0, True))
+    # Original (works with gradient descent)
+    mask = np.where(at_lo, g < 0, np.where(at_hi, g > 0, True))
+    # # Inverted (works with gradient ascent)
+    # mask = np.where(at_lo, g > 0, np.where(at_hi, g < 0, True))
     return (g * mask.astype(g.dtype),)
 
 directional_clip.defvjp(directional_clip_fwd, directional_clip_bwd)

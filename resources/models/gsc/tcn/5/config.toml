@@ -21,8 +21,8 @@ n_freq_masks = 2
 max_freq_width = 2
 
 [training]
-epochs = 90
-batch_size = 212
+epochs = 150
+batch_size = 256
 num_classes = 35
 
 [training.checkpoint]
@@ -42,10 +42,10 @@ w_eps = 1.0e-2
 class_steps = 50
 
 [training.optimizer]
-type = "adamw"
+type = "sgd"
 [training.optimizer.kwargs]
-learning_rate = 0.0001
-weight_decay = 0.00001
+learning_rate = 0.001
+# weight_decay = 0.00005
 
 [validation]
 split = 0.16
