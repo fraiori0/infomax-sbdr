@@ -57,6 +57,7 @@ config_optimizer_dict = {
     "rmsprop": optax.rmsprop,
     "adadelta": optax.adadelta,
     "adamax": optax.adamax,
+    "lion": optax.lion
 }
 
 config_module_dict = {

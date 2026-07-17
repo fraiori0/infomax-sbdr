@@ -3,7 +3,7 @@ type = "TCNPoolClassifier"
 seed = 46
 p_target = 0.01
 [model.kwargs]
-features = [312, 256, 256]
+features = [256, 256, 256]
 kernel_sizes = [3, 3, 3]
 kernel_strides = [1, 1, 1]
 pool_sizes = [3, 3, 3]
@@ -37,15 +37,17 @@ shuffle = true
 drop_last = true
 
 [training.loss]
-eps = 1.0e-2
+eps = 3.0e-2
 w_eps = 1.0e-2
 class_steps = 50
 
 [training.optimizer]
-type = "sgd"
+type = "adamw"
 [training.optimizer.kwargs]
 learning_rate = 0.001
-# weight_decay = 0.00005
+weight_decay = 0.00001
+# momentum=0.9
+# nesterov=true
 
 [validation]
 split = 0.16

@@ -279,13 +279,10 @@ class TemporalConvLayer(nn.Module):
             Float array of shape ``(*batch_dims, time_out, self.features)``
             where ``time_out = ⌊(time − 1) / stride⌋ + 1``.
         """
-
-        th = 0.3
-
         # 1. Causal padding
         # Prepend (kernel_size − 1) zero frames so each output step only
         # sees the present and past inputs, never future ones.
-        #
+    
         # np.pad expects a sequence of (before, after) pairs, one per axis.
         # Layout: [...batch axes..., time axis, feature axis]
         pad_size = self.kernel_size - 1
@@ -326,10 +323,6 @@ class TemporalConvPoolLayer(nn.Module):
     pool_stride: int
     use_bias: bool = True
  
-    # ------------------------------------------------------------------
-    # setup — create sub-modules and validate hyper-parameters
-    # ------------------------------------------------------------------
- 
     def setup(self) -> None:
         if self.kernel_size < 1:
             raise ValueError(f"kernel_size must be ≥ 1, got {self.kernel_size}")
@@ -344,7 +337,7 @@ class TemporalConvPoolLayer(nn.Module):
             strides=(self.kernel_stride,),
             padding="VALID",
             use_bias=self.use_bias,
-            bias_init=nn.initializers.constant(0.3),
+            bias_init=nn.initializers.constant(-1.5),
         )
  
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -361,7 +354,7 @@ class TemporalConvPoolLayer(nn.Module):
         # 1. Causal padding
         # Prepend (kernel_size − 1) zero frames so each output step only
         # sees the present and past inputs, never future ones.
-        #
+        
         # np.pad expects a sequence of (before, after) pairs, one per axis.
         # Layout: [...batch axes..., time axis, feature axis]
         pad_size = self.kernel_size - 1
@@ -371,12 +364,13 @@ class TemporalConvPoolLayer(nn.Module):
  
         # 2. Convolution (VALID — no further padding)
         pre_activation = self.conv(x)
-        # z = jax.nn.sigmoid(pre_activation)
-        # y = ut.threshold_softgradient(pre_activation)
-        z = directional_clip(pre_activation, lo=0.0, hi=1.0)
-        y = z.copy()
+        z = jax.nn.sigmoid(pre_activation)
+        y = ut.threshold_softgradient(pre_activation)
+        # z = directional_clip(pre_activation, lo=0.0, hi=1.0)
+        # y = np.where(z > 0.1, 1.0, 0.0)
 
-        # Aggregate temporally using max_pool or avg_pool
+
+        # 3. Aggregate temporally using max_pool or avg_pool
         p = nn.max_pool(
             z,
             window_shape=(self.pool_size,),
@@ -631,7 +625,6 @@ class TCN(nn.Module):
         ]
 
     def __call__(self, x):
-        th = 0.3
 
         # return all intermediate outputs
         outs = []
@@ -691,13 +684,17 @@ class TCNPoolClassifier(nn.Module):
         if self.stop_grad:
             x = jax.lax.stop_gradient(x)
         if self.binarize:
-            x = np.where(x > 0.1, x, 0.0)
+            x = np.where(x > 0.4, x, 0.0)
+            # x = np.where(x>0.3, 1.0, 0.0)
         return x
 
     def gather_input_classifier(self, outs):
         x = outs[-1]["p"]
         if self.stop_grad_class:
             x = jax.lax.stop_gradient(x)
+        if self.binarize:
+            x = np.where(x > 0.4, x, 0.0)
+            # x = np.where(x>0.3, 1.0, 0.0)
         return x
     
     def class_out_to_logits(self, class_out):

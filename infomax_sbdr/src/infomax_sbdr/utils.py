@@ -55,6 +55,22 @@ def strided_time_conv(x, weights, stride):
     return y.reshape(out_shape)
 
 
+@partial(jax.jit, static_argnums=1)
+def topk_mask(x, k):
+    """
+    Keep only the k-top largest values on the last dimension, zero-out everything else.
+
+    Args:
+        x: (*batch_dims, features)
+        k: int
+
+    Returns: (*batch_dims, features)
+    """
+    if k >= x.shape[-1]:
+        return x
+    thresh = np.take(jax.lax.top_k(x, k)[0], k - 1, axis=-1)[..., None]
+    return np.where(x >= thresh, x, 0)
+
 
 def sigmoid_ste(x):
     """ Sigmoid activation with straight-through gradient """

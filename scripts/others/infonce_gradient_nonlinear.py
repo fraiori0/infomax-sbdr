@@ -17,15 +17,18 @@ SEED = 1234
 eps = 1e-1
 
 def forward(params, x):
-    # return 0.5 * (1 + np.sin(x @ params["W"] + params["b"]))
-    # return np.abs(x @ params["W"] + params["b"])
     a = x @ params["W"] + params["b"]
-    # v = np.clip(a, a_min=0, a_max=1)
-    # v_zero = a - jax.lax.stop_gradient(a)
-    # extra_grad = -v_zero * 0.01
-    # v = v + (0.5 - a) * 0.01
-    v = sbdr.directional_clip(a, lo=0.0, hi=1.0)
-    # v = jax.nn.sigmoid(a)
+    # v = sbdr.directional_clip_rev(a, lo=0.0, hi=1.0)
+    # v = 2*jax.nn.sigmoid(a)
+    # v = np.sqrt(a**2 + 1e-4)
+    v = sbdr.directional_clip_rev(a, lo=0.0, hi=1.0)
+
+    # # compute distances
+    # d = x[..., None] - params["W"]
+    # d = np.linalg.norm(d, axis=-2)
+    # d = d + params["b"]
+    # # straight-through threshold
+    # v = sbdr.threshold_softgradient(-d)
     return v
 
 def forward_avg(params, x):
@@ -116,41 +119,100 @@ def grad_analytical_approx(params, x, true_yavg=False):
         "b": dl_db.mean(0),
     }
 
+
+# @jax.jit
+def sample_gmm(key, weights, means, covs, num_samples):
+    """
+    Sample synthetic data from a Gaussian Mixture Model efficiently in JAX.
+    
+    Args:
+        key: jax.random.PRNGKey for reproducibility.
+        weights: Array of shape (K,) representing component probabilities (must sum to 1).
+        means: Array of shape (K, D) representing component means.
+        covs: Array of shape (K, D, D) representing component covariance matrices.
+        num_samples: Integer N, the number of samples to generate.
+        
+    Returns:
+        samples: Array of shape (N, D) containing the generated synthetic data.
+        assignments: Array of shape (N,) containing the component index for each sample.
+    """
+    # 1. Split PRNG keys for the categorical draw and the normal noise draw
+    key_cat, key_norm = jax.random.split(key)
+    
+    # 2. Sample component assignments for all N data points
+    # jax.random.categorical expects unnormalized log-probabilities (logits)
+    logits = np.log(weights)
+    assignments = jax.random.categorical(key_cat, logits, shape=(num_samples,))
+    
+    # 3. Precompute Cholesky decomposition for all K covariance matrices simultaneously
+    # Shape: (K, D, D)
+    cholesky_factors = np.linalg.cholesky(covs)
+    
+    # 4. Generate standard normal noise for all N samples
+    num_dims = means.shape[1]
+    epsilon = jax.random.normal(key_norm, shape=(num_samples, num_dims))
+    
+    # 5. Gather the specific mean and Cholesky factor for each sample's assigned component
+    # Advanced indexing gathers rows without copying on XLA
+    chosen_means = means[assignments]         # Shape: (num_samples, num_dims)
+    chosen_L = cholesky_factors[assignments]  # Shape: (num_samples, num_dims, num_dims)
+    
+    # 6. Apply affine transformation: x_n = L_n @ epsilon_n + mu_n
+    # 'nij,nj->ni' performs batched matrix-vector multiplication across dimension N
+    samples = np.einsum('nij,nj->ni', chosen_L, epsilon) + chosen_means
+    
+    return samples, assignments
+
+
+"""----------------"""
+""" Initialization """
+"""----------------"""
+
 key = jax.random.key(SEED)
 
-# # POSITIVE init params
-# key, subkey = jax.random.split(key, 2)
-# params = {
-#     "W": np.abs(jax.random.normal(key, (IN_FEATURES, OUT_FEATURES))),
-#     "b": np.abs(jax.random.normal(subkey, (OUT_FEATURES,))),
-# }
-# # init samples
-# key, _ = jax.random.split(key, 2)
-# x = np.abs(jax.random.normal(key, (BATCH_SIZE, IN_FEATURES)))
-BATCH_SIZE = 1024
-IN_FEATURES = 89
-OUT_FEATURES = 128
+BATCH_SIZE = 2048
+IN_FEATURES = 75
+OUT_FEATURES = 64
+N_GAUSSIANS = 5
 
-# REAL init params
+# # # Init Params
 key, subkey = jax.random.split(key, 2)
+# # REAL init params
 params = {
-    "W": 0.05 * jax.random.normal(key, (IN_FEATURES, OUT_FEATURES)),
-    "b": np.zeros((OUT_FEATURES,)), # jax.random.normal(subkey, (OUT_FEATURES,)),
+    "W": (1/IN_FEATURES) * jax.random.normal(key, (IN_FEATURES, OUT_FEATURES)),
+    "b": 0 * np.ones((OUT_FEATURES,)), # jax.random.normal(subkey, (OUT_FEATURES,)),
 }
-# init samples
-key, _ = jax.random.split(key, 2)
-x = jax.random.normal(key, (BATCH_SIZE, IN_FEATURES))
+# # POSITIVE init params
+# params = {
+#     "W": 0.05*np.abs(jax.random.normal(key, (IN_FEATURES, OUT_FEATURES))),
+#     "b": 0 * np.ones((OUT_FEATURES,)), # np.abs(jax.random.normal(subkey, (OUT_FEATURES,))),
+# }
 
+# # # Init Samples
+# From multiple random gaussians
+key, subkey = jax.random.split(key, 2)
+mus = jax.random.normal(key, (N_GAUSSIANS, IN_FEATURES))
+ws = np.ones((N_GAUSSIANS,)) / N_GAUSSIANS
+# sample positive definite covariance matrices
+covs = jax.random.normal(subkey, (N_GAUSSIANS, IN_FEATURES, IN_FEATURES))
+covs = 0.1 * ((covs @ covs.transpose(0, 2, 1)) + np.eye(IN_FEATURES))
+# Sample
+key, _ = jax.random.split(key, 2)
+x, _ = sample_gmm(subkey, ws, mus, covs, BATCH_SIZE)
+
+# # # Preprocess
+# Rescale each component independently to z-score
+x = (x - x.mean(0)) / x.std(0)
+# # Rescale min-max to 0-1
+# x = (x - x.min(0)) / (x.max(0) - x.min(0))
+
+
+# # # Gradients
 # Compute gradients
 g_an = grad_analytical_approx(params, x)
 g_auto = grad(L)(params, x)
-
-
 # Compare
 diff = jax.tree.map(lambda x, y: x - y, g_an, g_auto)
-
-# pprint(diff)
-
 # print some nice diff statistics, including quantiles, mean, std
 qs = np.array([0.05, 0.25, 0.5, 0.75, 0.95])
 print(f"Quantiles: {np.quantile(diff['W'], qs)}")
@@ -166,7 +228,7 @@ print(f"Std: {np.std(diff['b'])}")
 """----------------"""
 
 N_STEPS = 15000
-ETA = 0.05
+ETA = 0.3
 # updates the params iteratively using the gradient
 # like sgd (ascent, actually), to compare what changes between using the 
 # analytically approximate gradient and the actual gradient 
@@ -181,21 +243,29 @@ params_auto = params.copy()
 @jit
 def update_params_analytical(params, x):
     g = grad_analytical_approx(params, x, true_yavg=True)
-    return {
-        "W": params["W"] + ETA * g["W"],
-        "b": params["b"] + ETA * g["b"],
-    }
+    params["W"] = params["W"] + ETA * g["W"]
+    params["b"] = params["b"] + ETA * g["b"]
+    
+    # # normalize weights and zero-out bias
+    # params["W"] = params["W"] / np.linalg.norm(params["W"], axis=0)
+    # params["b"] = np.zeros_like(params["b"])
+    return params
 
 @jit
 def update_params_automatic(params, x):
     g = grad(L)(params, x)
-    new_params = {
-        "W": params["W"] + ETA * g["W"],
-        "b": params["b"] + ETA * g["b"],
-    }
-    # # normalize W to be unit vectors in the input space
-    # new_params["W"] = new_params["W"] / np.linalg.norm(new_params["W"], axis=0)
-    return new_params
+    params["W"] = params["W"] + ETA * g["W"]
+    params["b"] = params["b"] + ETA * g["b"]
+    
+    # normalize weights and zero-out bias
+    # params["W"] = params["W"] / (np.linalg.norm(params["W"], axis=0, keepdims=True) + 1e-5)
+
+    # # softmax (so they are positive and sum to 1)
+    # params["W"] = jax.nn.softmax(params["W"], axis=0)
+
+    # clip bias to be non-positive
+    # params["b"] = np.clip(params["b"], a_min=None, a_max=0)
+    return params
 
 
 for i in tqdm(range(N_STEPS)):

@@ -17,4 +17,4 @@ import infomax_sbdr.analytic_score_diffusion as analytic_score_diffusion
 # import infomax_sbdr.ahtd as ahtd
 import infomax_sbdr.initializers as inits
 from infomax_sbdr.optax_clip import optax_gen_clip_transform
-from infomax_sbdr.clip_directional_gradient import directional_clip
+from infomax_sbdr.clip_directional_gradient import directional_clip, directional_clip_rev, directional_grad_rev

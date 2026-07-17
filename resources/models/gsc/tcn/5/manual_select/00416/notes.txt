@@ -1,0 +1,1 @@
+Directional-clip model, trained with SGD only, get to about 90% val accuracy (but unstable in later training)

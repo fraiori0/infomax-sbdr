@@ -456,8 +456,11 @@ checkpoint_manager = orbax.checkpoint.CheckpointManager(
 print("\nCheckpointing stuff")
 
 # add batch stats to train state
-optimizer = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
-optimizer = optimizer(**model_config["training"]["optimizer"]["kwargs"])
+optimizer_class = sbdr.config_optimizer_dict[model_config["training"]["optimizer"]["type"]]
+optimizer = optax.chain(
+    optax.add_decayed_weights(5e-4),
+    optimizer_class(**model_config["training"]["optimizer"]["kwargs"])
+)
 
 state = {
     "variables": variables,
@@ -555,14 +558,13 @@ def loss_fn_gen(state, batch, eval=False):
             # w = params[f"layers_{l_idx}"]["conv"]["kernel"]
 
             # p_loss_val, p_aux = pred_infonce(z, labels)
-            # z_loss_val, z_aux = encoder_infonce(z)
-            # z_loss_val, z_aux = encoder_infonce(z)
-            z_loss_val, z_aux = loo_infonce(z, batch["labels"])
+            z_loss_val, z_aux = encoder_infonce(z)
+            # z_loss_val, z_aux = loo_infonce(p, batch["labels"])
             # t_loss_val, t_aux = time_infonce(z)
             # w_loss_val, w_aux = w_abs_infonce(w)
 
             layer_loss_val = (
-                + z_loss_val
+                + z_loss_val #* (2 if l_idx==0 else 1)
             )
 
             loss_val = loss_val + layer_loss_val
