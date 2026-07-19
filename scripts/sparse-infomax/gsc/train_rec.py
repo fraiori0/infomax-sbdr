@@ -2,7 +2,7 @@ import os
 import argparse
 
 default_model = "rec"
-default_number = "3xorupdate"
+default_number = "4clip"
 default_cuda = "1"
 
 # base folder
@@ -506,7 +506,7 @@ outs, o_aux = forward(variables, xs, key)
 
 print("\nTesting loss function")
 for l_idx in range(len(outs)):
-    z = outs[l_idx]["h"]
+    z = outs[l_idx]["z"]
     z_loss_val, z_aux = encoder_infonce(z)
     loo_loss_val, loo_aux = loo_infonce(z, labels)
     print(f"\tLosses: layer {l_idx}")
@@ -581,7 +581,7 @@ def compute_metrics(outs):
     metrics = {}
 
     for l_idx, l_out in enumerate(outs):
-        for k in ["z_on", "z_off", "z_hold", "h"]:
+        for k in ["z", "y"]:
             
             # per-unit average
             unit_avg = np.mean(l_out[k].reshape((-1, l_out[k].shape[-1])), axis=0)
@@ -639,25 +639,16 @@ def loss_fn_gen(state, batch):
         metrics = compute_metrics(outs)
         for l_idx in range(len(outs)):
 
-            z = outs[l_idx]["h"]
-            z_alt = outs_alt[l_idx]["h"]
-            # # flatten features and time together
-            # z = z.reshape((*z.shape[:-2], -1))
-            # z_alt = z_alt.reshape((*z_alt.shape[:-2], -1))
-
-            # z_full = outs[l_idx]["z_full"]
-            # # Get weights
-            # wf = jax.nn.sigmoid(params[f"layers_{l_idx}"]["Wf"] - 2.0)
-            # wl = jax.nn.sigmoid(params[f"layers_{l_idx}"]["Wl"] - 2.0)
-            
+            z = outs[l_idx]["z"]
+            z_alt = outs_alt[l_idx]["z"]
             
             z_loss_val, z_aux = cross_infonce(z, z_alt)
-            t_loss_val, t_aux = cross_time_infonce(z, z_alt)
+            # t_loss_val, t_aux = cross_time_infonce(z, z_alt)
             # z_loss_val, z_aux = loo_infonce(z, batch["labels"])
            
             layer_loss_val = (
                 + z_loss_val
-                + t_loss_val
+                # + t_loss_val
             )
 
             loss_val = loss_val + layer_loss_val
@@ -672,7 +663,7 @@ def loss_fn_gen(state, batch):
         # gates = o_aux["gate"]
         class_loss_val, class_aux = classification_loss(logits, labels) #, gates=gates)
         # Update loss_val
-        loss_val = loss_val + 2*class_loss_val
+        loss_val = loss_val + 3*class_loss_val
 
         # Update metrics with classification
         metrics.update({"class/loss": class_loss_val})
@@ -787,7 +778,7 @@ def compute_activation_imgs(outs, params):
 
     for l_idx, l_out in enumerate(outs):
         # # binary activations
-        for k in ["z_on", "z_off", "z_hold", "h"]:
+        for k in ["z", "y"]:
             
             # select only a few outputs (e.g., 8) from the batch size
             _v = l_out[k][:N_MAX]

@@ -101,6 +101,7 @@ config_rpl_module_dict = {
     "MatchingPursuitClassifier": rpl.MatchingPursuitClassifier,
     "SDAClassifier": rpl.SDAClassifier,
     "SparseXORClassifier": rpl.SparseXORClassifier,
+    "RecClipClassifier": rpl.RecClipClassifier,
     "TCN": tcn.TCN,
     "TCNPoolClassifier": tcn.TCNPoolClassifier,
     "TCNPoolClassifierMulti": tcn.TCNPoolClassifierMulti,

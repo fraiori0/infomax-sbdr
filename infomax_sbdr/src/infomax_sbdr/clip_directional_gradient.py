@@ -19,8 +19,8 @@ def directional_clip_bwd(lo, hi, x, g):
     # # Inverted (works with gradient ascent)
     # mask = np.where(at_lo, g > 0, np.where(at_hi, g < 0, True))
 
-    # rescale also the gradient, so it's lower at the boundaries and max at 0.5
-    sig_x = jax.nn.sigmoid(x-0.5)
+    # # rescale also the gradient, so it's lower at the boundaries and max at 0.5
+    sig_x = jax.nn.sigmoid(np.e * (x-0.5))
     g_scale = 4*sig_x*(1-sig_x)
     g = g * g_scale
 

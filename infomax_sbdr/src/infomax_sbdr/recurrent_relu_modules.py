@@ -8,6 +8,7 @@ import infomax_sbdr.utils as ut
 import infomax_sbdr.initializers as my_inits
 from infomax_sbdr.delay_modules import DelayedLinear
 from infomax_sbdr.dense_modules import SparseDenseLayer
+from infomax_sbdr.clip_directional_gradient import directional_clip
 
 config_activation_dict = {
     "relu": nn.relu,
@@ -2508,3 +2509,186 @@ class SparseXORClassifier(SparseXORStack):
         }
         return outs, aux
 
+class RecClipLayer(nn.Module):
+    """
+    A simple vanilla recurrent layer with directional-gradient clip as nonlinear activation.
+    """
+    features : int
+    threshold : float = 0.1
+    stop_grad : bool = False
+
+    def setup(self):
+        self.f = nn.Dense(self.features, use_bias=True)
+        self.r = nn.Dense(self.features, use_bias=False)
+
+    def z_to_y(self, z):
+        y = np.where(z > self.threshold, z, 0.0)
+        if self.stop_grad:
+            y = jax.lax.stop_gradient(y)
+        return y
+
+    def __call__(self, state, x):
+
+        z = state["z"]
+
+        af = self.f(x)
+        al = self.r(z)
+        a = af + al
+        # directional-gradient clip
+        z = directional_clip(a, lo=0.0, hi=1.0)
+
+        # thresholded pass-forward value
+        y = self.z_to_y(z)
+
+        new_state = {
+            "z": z,
+        }
+
+        out = {
+            "z": z,
+            "y": y,
+        }
+
+        return new_state, out
+    
+    @nn.nowrap
+    def init_state_from_input(self, key, x):
+        # Init a the recurrent state
+        # Note: this method can be called without the "apply" method, i.e., before initialization
+        # so we cannot access self.[layer] or its methods
+        std = 0.5
+        mu = 0.1
+        z = mu + std * jax.random.normal(key, shape=(*x.shape[:-1], self.features), dtype=np.float32)
+        z = directional_clip(z, lo=0.0, hi=1.0)
+
+        state = {
+            "z": z,
+        }
+        return state
+
+    def scan(self, state, x_seq):
+        # assume input x_seq is of shape 
+        # (*batch_dims, time, features), i.e., we have a sequence of time-steps
+
+        def f_scan(crr, inp):
+            x = inp
+            state = crr
+            new_state, outs = self(state, x)
+            return new_state, outs
+
+        # move time axis in first position, required by jax.lax.scan
+        x_seq = np.moveaxis(x_seq, -2, 0)
+
+        # scan
+        _, outs = jax.lax.scan(f_scan, state, x_seq)
+
+        # move back time axis
+        outs = jax.tree.map(lambda x: np.moveaxis(x, 0, -2), outs)
+
+        return outs
+    
+class RecClipStack(nn.Module):
+    features : Sequence[int]
+    stop_grad : bool = False
+
+    def setup(self):
+        layers = []
+        for f in self.features:
+            layers.append(RecClipLayer(features=f, stop_grad=self.stop_grad))
+        self.layers = layers
+
+    def __call__(self, state, x):
+        # sequentially apply each layer
+        outs = []
+        new_states = []
+
+        x_in = x
+        for i in range(len(self.features)):
+            
+            new_st, out = self.layers[i](state[i], x_in)
+            x_in = out["y"]
+
+            outs.append(out)
+            new_states.append(new_st)
+        
+        return new_states, outs
+    
+    @nn.nowrap
+    def init_state_from_input(self, key, x):
+        # Init a the recurrent state
+        # Note: this method can be called without the "apply" method, i.e., before initialization
+        states = []
+        for i in range(len(self.features)):
+            std = 0.3
+            mu = 0.2
+            z = mu + std * jax.random.normal(key, shape=(*x.shape[:-1], self.features[i]), dtype=np.float32)
+            z = directional_clip(z, lo=0.0, hi=1.0)
+            states.append({
+                "z": z,
+            })
+            
+            # split key for next layer
+            key, _ = jax.random.split(key, 2)
+
+        return states
+    
+    def scan(self, states, x_seq):
+
+        outs = []
+        x_in = x_seq
+        for l_idx in range(len(self.features)):
+            # note, scan does not return the final state
+            out = self.layers[l_idx].scan(states[l_idx], x_in)
+            outs.append(out)
+
+            # set input sequence for the next layer
+            x_in = out["y"]
+
+        return outs
+    
+class RecClipClassifier(RecClipStack):
+    out_labels: int = 1
+    class_kernel_size: int = 1
+    class_kernel_stride: int = 1
+
+    def setup(self):
+        super().setup()
+
+        # final classifier layer, temporal convolution
+        # self.classifier = nn.Dense(self.out_labels)
+        self.classifier = nn.Conv(
+            features=self.out_labels + 1, # last extra one is a gate
+            kernel_size=(self.class_kernel_size,),
+            strides=(self.class_kernel_stride,),
+            padding="VALID",
+        )
+    
+    def gather_input_classifier(self, outs):
+        x = outs[-1]["y"]
+        return x
+    
+    def class_out_to_logits(self, class_out):
+        gate = jax.nn.sigmoid(class_out[..., -1])
+        logits = class_out[..., :-1] * gate[..., None]
+        return logits
+    
+    def __call__(self, states, x):
+        new_states, outs = super().__call__(states, x)
+        class_in = self.gather_input_classifier(outs)
+        class_out = self.classifier(class_in)
+        logits = self.class_out_to_logits(class_out)
+
+        aux = {
+            "logit": logits,
+        }
+        return new_states, (outs, aux)
+    
+    def scan(self, states, x_seq):
+        outs = super().scan(states, x_seq)
+        class_out = self.classifier(self.gather_input_classifier(outs))
+        logits = self.class_out_to_logits(class_out)
+
+        aux = {
+            "logit": logits,
+        }
+        return outs, aux
