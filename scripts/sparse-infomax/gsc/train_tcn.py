@@ -2,7 +2,7 @@ import os
 import argparse
 
 default_model = "tcn"
-default_number = "5"
+default_number = "6"
 default_cuda = "2"
 
 # base folder
@@ -421,6 +421,26 @@ def loo_infonce(a, labels, eps=None):
 
     return loss_val, aux
 
+def cross_infonce(y_1, y_2, eps=None):
+
+    if eps is None:
+        eps = model_config["training"]["loss"]["eps"]
+
+    # compute InfoNCE between two encodings
+    y_1_avg = y_1.reshape((-1, y_1.shape[-1])).mean(0)
+    y_2_avg = y_2.reshape((-1, y_2.shape[-1])).mean(0)
+
+    p_ii = (y_1 * y_2).sum(-1) + model_config["training"]["loss"]["eps"]
+    p_avg_1 = (y_1 * y_1_avg).sum(-1) + model_config["training"]["loss"]["eps"]
+    p_avg_2 = (y_2 * y_2_avg).sum(-1) + model_config["training"]["loss"]["eps"]
+    loss_val = -(np.log(p_ii / p_avg_1) + np.log(p_ii / p_avg_2)).mean()
+
+    aux = {
+        "infonce" : loss_val,
+    }
+
+    return loss_val, aux
+
 # test loss function
 xs, labels = next(iter(dataloader_train))
 key = jax.random.key(model_config["model"]["seed"])
@@ -538,14 +558,29 @@ print("\nTraining and Evaluation Steps")
 def loss_fn_gen(state, batch, eval=False):
     
     def loss_fn(params):
-        # Apply the model
+        
+        # Select forward function
         f_fn = forward if not eval else forward_eval
+
+        # augment inputs
+        x_1 = batch["x_1"] + 0.05 * jax.random.normal(batch["key_1"], batch["x_1"].shape)
+        x_2 = batch["x_2"] + 0.05 * jax.random.normal(batch["key_2"], batch["x_2"].shape)
+
+        # Apply the model
         outs, o_aux = f_fn(
             {
                 "params": params,
             },
-            batch["x_1"],
+            x_1,
             batch["key_1"],
+        )
+
+        outs_alt, _ = f_fn(
+            {
+                "params": params,
+            },
+            x_2,
+            batch["key_2"],
         )
 
         # compute loss for each layer
@@ -555,10 +590,11 @@ def loss_fn_gen(state, batch, eval=False):
 
             z = outs[l_idx]["z"]
             p = outs[l_idx]["p"]
-            # w = params[f"layers_{l_idx}"]["conv"]["kernel"]
+            z_alt = outs_alt[l_idx]["z"]
 
             # p_loss_val, p_aux = pred_infonce(z, labels)
-            z_loss_val, z_aux = encoder_infonce(z)
+            # z_loss_val, z_aux = encoder_infonce(z)
+            z_loss_val, z_aux = cross_infonce(z, z_alt)
             # z_loss_val, z_aux = loo_infonce(p, batch["labels"])
             # t_loss_val, t_aux = time_infonce(z)
             # w_loss_val, w_aux = w_abs_infonce(w)
@@ -579,7 +615,7 @@ def loss_fn_gen(state, batch, eval=False):
         logits = o_aux["logit"]
         class_loss_val, class_aux = classification_loss(logits, labels)
         # Update loss_val
-        loss_val = loss_val + 4*class_loss_val
+        loss_val = loss_val + 5*class_loss_val
 
         # Update metrics with classification
         metrics.update({"class/loss": class_loss_val})

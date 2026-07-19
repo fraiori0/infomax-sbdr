@@ -337,7 +337,7 @@ class TemporalConvPoolLayer(nn.Module):
             strides=(self.kernel_stride,),
             padding="VALID",
             use_bias=self.use_bias,
-            bias_init=nn.initializers.constant(-1.5),
+            bias_init=nn.initializers.constant(0.3),
         )
  
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -364,11 +364,8 @@ class TemporalConvPoolLayer(nn.Module):
  
         # 2. Convolution (VALID — no further padding)
         pre_activation = self.conv(x)
-        z = jax.nn.sigmoid(pre_activation)
-        y = ut.threshold_softgradient(pre_activation)
-        # z = directional_clip(pre_activation, lo=0.0, hi=1.0)
-        # y = np.where(z > 0.1, 1.0, 0.0)
-
+        # z = jax.nn.sigmoid(pre_activation)
+        z = directional_clip(pre_activation, lo=0.0, hi=1.0)
 
         # 3. Aggregate temporally using max_pool or avg_pool
         p = nn.max_pool(
@@ -377,11 +374,12 @@ class TemporalConvPoolLayer(nn.Module):
             strides=(self.pool_stride,),
             padding="SAME",
         )
-        # p=z
-        # # Alternative: a 1/t kernel
-        # w_pool = 1.0/np.arange(1, self.pool_size+1)
-        # # collapse batch dimensions
-        # p = ut.strided_time_conv(z, w_pool, self.pool_stride)
+        
+        # 4. Compute also an output for next layer (can be a copy of z, p, or something else)
+        # Keep only top-k activations
+        n_k = int(self.features * 0.05)
+        y = ut.topk_mask(p, n_k)
+
 
         outs = {
             "z": z,
@@ -680,7 +678,7 @@ class TCNPoolClassifier(nn.Module):
         self.classifier = nn.Dense(self.class_features + 1) 
     
     def out_to_next(self, out):
-        x = out["p"]
+        x = out["y"]
         if self.stop_grad:
             x = jax.lax.stop_gradient(x)
         if self.binarize:
@@ -689,7 +687,7 @@ class TCNPoolClassifier(nn.Module):
         return x
 
     def gather_input_classifier(self, outs):
-        x = outs[-1]["p"]
+        x = outs[-1]["y"]
         if self.stop_grad_class:
             x = jax.lax.stop_gradient(x)
         if self.binarize:
